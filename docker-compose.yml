@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  basip-pin-rotator:
+    build: .
+    container_name: basip-pin-rotator
+    restart: unless-stopped
+    # host network mode allows container to easily reach BAS-IP panels in LAN
+    network_mode: host
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./service_account.json:/app/service_account.json:ro
+      - ./users_access_codes.csv:/app/users_access_codes.csv
+    environment:
+      - PYTHONUNBUFFERED=1

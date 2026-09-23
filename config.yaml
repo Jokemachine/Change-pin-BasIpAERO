@@ -1,0 +1,55 @@
+# ==============================================================================
+# Конфигурация сервиса автоматической смены кодов доступа BAS-IP AA14FB
+# Структура объекта: 4 дома (в 1-м и 4-м по 3 двойных подъезда,
+#                    во 2-м и 3-м по 6 двойных подъездов) + 2 калитки = всего 38 панелей
+# ==============================================================================
+
+# Топология вызывных панелей жилого комплекса
+facility_topology:
+  use_default_38_panels: true  # Автоматически создать топологию из 38 панелей
+  base_ip_prefix: "192.168.1." # Базовая подсеть для панелей домофонов
+  start_ip_suffix: 10          # Начальный IP (192.168.1.10 ... 192.168.1.47)
+  default_port: 80
+  default_username: "admin"
+  default_password: "ВашПароль"
+
+# Список панелей (если хотите задать нестандартные IP вручную для каждой панели,
+# раскомментируйте нужные секции. Если basip_panels пуст - берется facility_topology)
+basip_panels: []
+
+# Интеграция с Google Таблицами
+# Рекомендуется "google_apps_script", если Google Cloud Console заблокирован в вашей стране
+google_sheets:
+  backend_type: "google_apps_script"
+  gas_web_app_url: ""
+  gas_api_key: ""
+  appsheet_app_id: ""
+  appsheet_access_key: ""
+  appsheet_table_name: "Коды доступа"
+  credentials_json: "service_account.json"
+  spreadsheet_id_or_title: "BAS-IP Access Codes"
+  worksheet_name: "Коды доступа"
+  csv_fallback_path: "users_access_codes.csv"
+
+# Отправка писем через Google Mail (Gmail SMTP)
+gmail:
+  user: "your_building_intercom@gmail.com"
+  app_password: "xxxx yyyy zzzz wwww"
+  from_name: "Домофон BAS-IP AA-14FB"
+  subject: "Смена кода доступа домофона"
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 465
+  use_ssl: true
+  mock_email: false
+
+# Параметры ротации кодов доступа
+rotation:
+  interval_days: 14            # Смена раз в две недели
+  code_length: 6               # 6-значный PIN
+  avoid_trivial_codes: true    # Исключать тривиальные (123456, 111111)
+  dry_run: false
+  schedule_time: "03:00"
+  check_interval_hours: 12
+
+use_mock_panel: false
+mock_panel_port: 18080
