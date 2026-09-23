@@ -241,7 +241,7 @@
   host: "172.39.3.191"
   port: 80
   username: "admin"
-  password: "ВашПароль"
+  password: "O8jglwISGd"
 
 # --- Подъезд 2 ---
 - panel_id: "d3_p2_a"
