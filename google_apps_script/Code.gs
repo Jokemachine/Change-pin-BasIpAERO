@@ -4,21 +4,17 @@
  *
  * Инструкция по установке:
  * 1. В вашей Google Таблице откройте меню: «Расширения» -> «Apps Script»
- * 2. Удалите стандартный код и вставьте содержимое этого файла
- * 3. Нажмите «Сохранить» (иконка дискеты или Ctrl+S)
- * 4. Нажмите синюю кнопку «Развернуть» (Deploy) -> «Новое развертывание» (New deployment)
- * 5. Нажмите на шестеренку слева от «Выберите тип» и выберите «Веб-приложение» (Web app)
- * 6. Настройки:
- *    - Описание: BAS-IP Connector
- *    - Запуск от имени: «Я (ваш@gmail.com)»
- *    - У кого есть доступ: «Все» (Anyone)
- * 7. Нажмите «Развернуть», предоставьте разрешения (если запросит)
- * 8. Скопируйте полученный URL веб-приложения (вида https://script.google.com/macros/s/.../exec)
- *    и вставьте его в config.yaml в поле web_app_url.
+ * 2. Удалите старый код и вставьте содержимое этого файла
+ * 3. Нажмите «Сохранить» (Ctrl+S)
+ * 4. Нажмите «Развернуть» (Deploy) -> «Управление развертываниями» (Manage deployments)
+ * 5. Нажмите на иконку карандаша ✏️ (Редактировать)
+ * 6. В поле «Версия» (Version) выберите: «Новая версия» (New version)  <--- ВАЖНО!
+ * 7. В поле «У кого есть доступ»: выберите «Все» (Anyone)
+ * 8. Нажмите «Развернуть» (Deploy).
  */
 
-// Опционально: можно задать секретный ключ для защиты от посторонних вызовов
 var API_KEY = ""; 
+var TARGET_SHEET_NAME = "Временные коды"; // Название целевой вкладки
 
 function doGet(e) {
   return handleRequest(e ? e.parameter : {});
@@ -38,6 +34,28 @@ function doPost(e) {
   return handleRequest(params);
 }
 
+function findTargetSheet(ss, requestedName) {
+  var nameToFind = (requestedName || TARGET_SHEET_NAME).trim().toLowerCase();
+  var allSheets = ss.getSheets();
+  
+  // 1. Точное совпадение (без учета регистра и пробелов)
+  for (var i = 0; i < allSheets.length; i++) {
+    if (allSheets[i].getName().trim().toLowerCase() === nameToFind) {
+      return allSheets[i];
+    }
+  }
+
+  // 2. Частичное совпадение (если вкладка называется например "Коды временные" или "Временные")
+  for (var j = 0; j < allSheets.length; j++) {
+    var currentName = allSheets[j].getName().trim().toLowerCase();
+    if (currentName.indexOf("временн") >= 0 || currentName.indexOf("temp") >= 0) {
+      return allSheets[j];
+    }
+  }
+
+  return null;
+}
+
 function handleRequest(params) {
   if (API_KEY && params.api_key !== API_KEY) {
     return ContentService.createTextOutput(JSON.stringify({
@@ -47,21 +65,15 @@ function handleRequest(params) {
   }
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var requestedSheetName = params.sheet_name || params.worksheet_name || TARGET_SHEET_NAME;
+  var sheet = findTargetSheet(ss, requestedSheetName);
 
-  // Выбор нужной вкладки (по умолчанию "Временные коды" или переданное в параметрах)
-  var requestedSheet = params.sheet_name || params.worksheet_name || "Временные коды";
-  var sheet = ss.getSheetByName(requestedSheet);
   if (!sheet) {
-    var allSheets = ss.getSheets();
-    for (var s = 0; s < allSheets.length; s++) {
-      if (allSheets[s].getName().trim().toLowerCase() === requestedSheet.trim().toLowerCase()) {
-        sheet = allSheets[s];
-        break;
-      }
-    }
-  }
-  if (!sheet) {
-    sheet = ss.getActiveSheet();
+    var availableNames = ss.getSheets().map(function(s) { return '"' + s.getName() + '"'; });
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: "Вкладка '" + requestedSheetName + "' не найдена! Доступные вкладки в таблице: [" + availableNames.join(", ") + "]. Проверьте правильность названия вкладки."
+    })).setMimeType(ContentService.MimeType.JSON);
   }
 
   var action = params.action || "get_users";
@@ -157,6 +169,7 @@ function handleRequest(params) {
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
       sheet_name: sheet.getName(),
+      total_rows: users.length,
       headers: headers,
       users: users
     })).setMimeType(ContentService.MimeType.JSON);
@@ -222,6 +235,7 @@ function handleRequest(params) {
 
       return ContentService.createTextOutput(JSON.stringify({
         success: true,
+        sheet_name: sheet.getName(),
         row: targetRow,
         code: newCode,
         email_sent: emailSent
@@ -230,7 +244,8 @@ function handleRequest(params) {
 
     return ContentService.createTextOutput(JSON.stringify({
       success: false,
-      error: "Пользователь не найден в таблице (ID: " + targetId + ", Имя: " + targetName + ")"
+      sheet_name: sheet.getName(),
+      error: "Пользователь не найден на вкладке '" + sheet.getName() + "' (ID: " + targetId + ", Имя: " + targetName + ")"
     })).setMimeType(ContentService.MimeType.JSON);
   }
 
