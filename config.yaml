@@ -21,7 +21,7 @@ basip_panels: []
 # Рекомендуется "google_apps_script", если Google Cloud Console заблокирован в вашей стране
 google_sheets:
   backend_type: "google_apps_script"
-  gas_web_app_url: ""
+  gas_web_app_url: "https://script.google.com/macros/s/AKfycbwVheDx1OHq5r_7bvAsOsRHpPS3XbvGfcKzTRhMwP43OoLaIef0Lpx-12dV9--WHYEo/exec"
   gas_api_key: ""
   appsheet_app_id: ""
   appsheet_access_key: ""
@@ -33,8 +33,8 @@ google_sheets:
 
 # Отправка писем через Google Mail (Gmail SMTP)
 gmail:
-  user: "your_building_intercom@gmail.com"
-  app_password: "xxxx yyyy zzzz wwww"
+  user: "jokemachine5@gmail.com"
+  app_password: "lnoh vlal avlv iqtr"
   from_name: "Домофон BAS-IP AA-14FB"
   subject: "Смена кода доступа домофона"
   smtp_host: "smtp.gmail.com"
