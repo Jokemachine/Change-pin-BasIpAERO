@@ -8,13 +8,45 @@ Google Sheets and Table integrations:
 import csv
 import logging
 import os
+import re
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import requests
 
 from basip.models import AccessCodeUser
 
 logger = logging.getLogger(__name__)
+
+
+def extract_house_entrance_from_text(text: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Intelligently extracts House (дом) and Entrance (подъезд) from freeform strings
+    such as '50 (2 под., 4 этаж)', '3п 6эт. кв. 93', 'д. 2, 3 подъезд, кв 45'.
+    """
+    if not text:
+        return None, None
+    
+    house, entrance = None, None
+
+    # House pattern: дом 2, д. 2, корпус 3, корп. 1
+    h_m = re.search(r'\b(?:дом|д\.|корпус|корп\.|здание|house)\s*(\d+)', text, re.IGNORECASE)
+    if h_m:
+        house = h_m.group(1)
+
+    # Entrance pattern:
+    # 1. '2 подъезд', '2под', '2 п.', '2п'
+    e_m = re.search(r'(\d+)\s*(?:подъезд|под\b|п\b|\.п)', text, re.IGNORECASE)
+    if not e_m:
+        # 2. 'подъезд 2', 'под. 2'
+        e_m = re.search(r'\b(?:подъезд|под)\.?\s*(\d+)', text, re.IGNORECASE)
+    if not e_m:
+        # 3. 'п. 2' (not followed by кв)
+        e_m = re.search(r'\bп\.?\s*(\d+)(?!\s*кв)', text, re.IGNORECASE)
+    
+    if e_m:
+        entrance = e_m.group(1)
+
+    return house, entrance
 
 # Standard header column aliases
 COLUMN_ALIASES = {
@@ -106,6 +138,14 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
             house = str(item.get("house", item.get("building", ""))).strip()
             entrance = str(item.get("entrance", item.get("porch", ""))).strip()
             access_panels = str(item.get("access_panels", item.get("access", ""))).strip()
+
+            # Fallback: extract house and entrance from apartment text if missing
+            if apartment and (not house or not entrance):
+                parsed_h, parsed_e = extract_house_entrance_from_text(apartment)
+                if not house and parsed_h:
+                    house = parsed_h
+                if not entrance and parsed_e:
+                    entrance = parsed_e
             code = str(item.get("code", "")).strip()
             auto_rotate_raw = str(item.get("auto_rotate", "Да")).lower()
             auto_rotate = auto_rotate_raw in ("да", "true", "1", "yes", "+")
@@ -623,6 +663,13 @@ class LocalCSVSheetsBackend(BaseSheetsBackend):
                 house = get_val("house")
                 entrance = get_val("entrance")
                 access_panels = get_val("access_panels")
+
+                if apartment and (not house or not entrance):
+                    parsed_h, parsed_e = extract_house_entrance_from_text(apartment)
+                    if not house and parsed_h:
+                        house = parsed_h
+                    if not entrance and parsed_e:
+                        entrance = parsed_e
                 code = get_val("code")
                 auto_rotate = get_val("auto_rotate", "да").lower() in ("да", "true", "1", "yes", "+")
 

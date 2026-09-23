@@ -74,11 +74,11 @@ function handleRequest(params) {
     }
 
     var idCol = findCol(["id", "ид", "номер", "user_id"]);
-    var nameCol = findCol(["имя", "фио", "name", "fio", "пользователь"]);
-    var emailCol = findCol(["email", "e-mail", "почта", "mail"]);
-    var aptCol = findCol(["квартира", "офис", "apartment", "flat", "room"]);
-    var houseCol = findCol(["дом", "здание", "building", "house", "д."]);
-    var entranceCol = findCol(["подъезд", "секция", "entrance", "porch", "section", "п."]);
+    var nameCol = findCol(["имя", "фио", "name", "fio", "пользователь", "заявитель", "клиент"]);
+    var emailCol = findCol(["email", "e-mail", "почта", "mail", "почта заявителя", "электронная почта", "контакты"]);
+    var aptCol = findCol(["квартира", "офис", "apartment", "flat", "room", "помещение"]);
+    var houseCol = findCol(["дом", "здание", "building", "house", "д.", "номер дома"]);
+    var entranceCol = findCol(["подъезд", "секция", "entrance", "porch", "section", "п.", "парадная"]);
     var accessCol = findCol(["доступ", "доступ (панели)", "панели", "доступные панели", "access", "access_panels"]);
     var codeCol = findCol(["код", "код доступа", "рабочий код", "текущий код", "code", "pin"]);
     var autoCol = findCol(["автосмена", "ротация", "auto_rotate", "autorotate"]);
@@ -95,6 +95,22 @@ function handleRequest(params) {
       var email = emailCol >= 0 ? String(row[emailCol] || "") : "";
       if (!name && !email) continue;
 
+      var aptVal = aptCol >= 0 ? String(row[aptCol] || "") : "";
+      var houseVal = houseCol >= 0 ? String(row[houseCol] || "") : "";
+      var entranceVal = entranceCol >= 0 ? String(row[entranceCol] || "") : "";
+
+      // Если дом или подъезд не вынесены в отдельные столбцы, извлекаем из квартиры/комментария
+      if (aptVal && (!houseVal || !entranceVal)) {
+        if (!entranceVal) {
+          var entMatch = aptVal.match(/(\d+)\s*(?:подъезд|под|п\b|\.п)/i) || aptVal.match(/(?:подъезд|под)\.?\s*(\d+)/i);
+          if (entMatch) entranceVal = entMatch[1];
+        }
+        if (!houseVal) {
+          var houseMatch = aptVal.match(/(?:дом|д\.|корпус|корп\.)\s*(\d+)/i);
+          if (houseMatch) houseVal = houseMatch[1];
+        }
+      }
+
       var dateVal = "";
       if (dateCol >= 0 && row[dateCol]) {
         if (row[dateCol] instanceof Date) {
@@ -109,9 +125,9 @@ function handleRequest(params) {
         id: idCol >= 0 && row[idCol] ? String(row[idCol]) : ("user_" + (r + 1)),
         name: name,
         email: email,
-        apartment: aptCol >= 0 ? String(row[aptCol] || "") : "",
-        house: houseCol >= 0 ? String(row[houseCol] || "") : "",
-        entrance: entranceCol >= 0 ? String(row[entranceCol] || "") : "",
+        apartment: aptVal,
+        house: houseVal,
+        entrance: entranceVal,
         access_panels: accessCol >= 0 ? String(row[accessCol] || "") : "",
         code: codeCol >= 0 ? String(row[codeCol] || "") : "",
         auto_rotate: autoCol >= 0 ? String(row[autoCol] || "Да") : "Да",
@@ -123,6 +139,7 @@ function handleRequest(params) {
 
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
+      headers: headers,
       users: users
     })).setMimeType(ContentService.MimeType.JSON);
   }

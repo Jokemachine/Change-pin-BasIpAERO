@@ -14,7 +14,13 @@ from core.config import AppConfig, load_config
 from core.rotator import PINRotator
 from core.scheduler import RotationScheduler
 from google_services.mailer import GmailSMTPMailer, MockMailer, BaseMailer
-from google_services.sheets import GoogleSheetsService, LocalCSVSheetsBackend, BaseSheetsBackend
+from google_services.sheets import (
+    GoogleSheetsService,
+    LocalCSVSheetsBackend,
+    GoogleAppsScriptBackend,
+    AppSheetBackend,
+    BaseSheetsBackend,
+)
 
 logger = logging.getLogger("basip_rotator")
 

@@ -114,25 +114,26 @@ class AccessCodeUser:
                     # Access to entire house
                     return True
 
-        # Match by House and Entrance
+        # Match by House and/or Entrance
         if self.house:
-            # Parse possible comma-separated houses e.g. "1, 2" or "1"
             clean_house = self.house.lower().replace("дом", "").replace("д.", "").strip()
             user_houses = [h.strip() for h in clean_house.split(",") if h.strip()]
             panel_house = str(panel.building) if panel.building is not None else ""
-            if panel_house not in user_houses:
+            if panel_house not in user_houses and not any(uh in all_markers for uh in user_houses):
                 return False
 
-            # If entrance is specified, check entrance
-            if self.entrance:
-                clean_entrance = self.entrance.lower().replace("подъезд", "").replace("п.", "").strip()
-                user_entrances = [e.strip() for e in clean_entrance.split(",") if e.strip()]
-                if any(ue in all_markers for ue in user_entrances):
-                    return True
-                panel_entrance = str(panel.entrance) if panel.entrance is not None else ""
-                if panel_entrance not in user_entrances:
-                    return False
+        if self.entrance:
+            clean_entrance = self.entrance.lower().replace("подъезд", "").replace("п.", "").strip()
+            user_entrances = [e.strip() for e in clean_entrance.split(",") if e.strip()]
+            if any(ue in all_markers for ue in user_entrances):
+                return True
+            panel_entrance = str(panel.entrance) if panel.entrance is not None else ""
+            if panel_entrance not in user_entrances:
+                return False
+            return True
 
+        # If house was specified without entrance, grant access to all entrances of that house
+        if self.house:
             return True
 
         return False
