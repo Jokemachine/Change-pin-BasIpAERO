@@ -185,7 +185,12 @@ python3 main.py daemon
 
 ## ⏰ Запуск службы 24/7
 
-### Вариант 1: Systemd (Linux / Raspberry Pi)
+### Вариант 1: Windows (Планировщик заданий / Task Scheduler)
+Подробная пошаговая инструкция для Windows: **[WINDOWS_GUIDE.md](WINDOWS_GUIDE.md)**
+1. Установите зависимости в 1 клик через `install_windows.bat`.
+2. Запустите планировщик `taskschd.msc` и добавьте ежедневный запуск `run_silent.vbs` (в фоновом режиме без всплывающего окна) или `run_now.bat`.
+
+### Вариант 2: Systemd (Linux / Raspberry Pi)
 ```bash
 sudo cp systemd/basip-pin-rotator.service /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -193,7 +198,7 @@ sudo systemctl enable basip-pin-rotator
 sudo systemctl start basip-pin-rotator
 ```
 
-### Вариант 2: Docker Compose
+### Вариант 3: Docker Compose (Кроссплатформенный)
 ```bash
 docker compose up -d
 ```
