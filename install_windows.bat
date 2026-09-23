@@ -9,15 +9,21 @@ echo.
 
 set PYTHON_CMD=
 
-python --version >nul 2>&1
-if not errorlevel 1 (
-    set PYTHON_CMD=python
-    goto :python_found
-)
-
 py -3 --version >nul 2>&1
 if not errorlevel 1 (
     set PYTHON_CMD=py -3
+    goto :python_found
+)
+
+py --version >nul 2>&1
+if not errorlevel 1 (
+    set PYTHON_CMD=py
+    goto :python_found
+)
+
+python --version >nul 2>&1
+if not errorlevel 1 (
+    set PYTHON_CMD=python
     goto :python_found
 )
 
@@ -37,12 +43,14 @@ if not exist ".venv" (
 )
 echo.
 
-echo [3/3] Установка библиотек из requirements.txt...
+echo [3/3] Установка библиотек...
 if exist ".venv\Scripts\python.exe" (
     .venv\Scripts\python.exe -m pip install --upgrade pip
+    .venv\Scripts\pip.exe install requests pyyaml schedule python-dotenv
     .venv\Scripts\pip.exe install -r requirements.txt
 ) else (
     %PYTHON_CMD% -m pip install --upgrade pip
+    %PYTHON_CMD% -m pip install requests pyyaml schedule python-dotenv
     %PYTHON_CMD% -m pip install -r requirements.txt
 )
 
@@ -69,11 +77,12 @@ echo.
 echo Для работы программы требуется Python 3.10 или новее.
 echo.
 echo Что нужно сделать:
-echo 1. Скачайте Python с сайта: https://www.python.org/downloads/
-echo 2. Запустите скачанный файл установщика.
-echo 3. ВАЖНО: в первом окне внизу ОБЯЗАТЕЛЬНО поставьте галочку:
-echo    [x] Add python.exe to PATH
-echo 4. После установки Python снова запустите этот файл install_windows.bat
+echo 1. Если Python 3.14 уже установлен:
+echo    Отключите псевдонимы Windows Store:
+echo    Параметры Windows -> Приложения -> Псевдонимы выполнения приложений
+echo    -> отключите галочки у "Установщик приложений (python.exe)".
+echo 2. Либо запустите установщик Python еще раз и выберите Modify,
+echo    отметив галочку "Add python.exe to PATH".
 echo.
 echo Открыть страницу скачивания Python в браузере? (Y/N)
 set /p OPEN_BROWSER="Введите Y или N: "
