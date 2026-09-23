@@ -232,16 +232,20 @@ def cmd_test_panel(args, config: AppConfig):
             print("2. Кабель не подключен к коммутатору домофонов или отключено питание панелей.")
             print("3. Брандмауэр блокирует обращение к подсети 172.39.x.x.\n")
 
-        if any(results.values()):
-            # Display current identifiers
-            for client in manager.clients:
+        has_any_ok = any(res[0] if isinstance(res, tuple) else res for res in results.values())
+        if has_any_ok:
+            # Display current identifiers from first responding panel
+            for pid, client in manager.clients.items():
                 try:
-                    identifiers = client.get_identifiers(limit=10)
-                    print(f"\nСуществующие идентификаторы на панели ({client.config.host}:{client.config.port}):")
+                    identifiers = client.get_identifiers(limit=5)
+                    print(f"\nПример существующих идентификаторов в памяти панели {pid} ({client.config.host}:{client.config.port}):")
+                    if not identifiers:
+                        print(" - В памяти панели пока нет созданных идентификаторов")
                     for i in identifiers:
-                        print(f" - UID: {i.item_uid}, Имя: {i.name}, Тип: {i.identifier_type}, Код: {i.identifier_number}")
+                        print(f" - UID: {i.item_uid}, Имя: '{i.name}', Тип: '{i.identifier_type}', Код: '{i.identifier_number}'")
+                    break
                 except Exception as e:
-                    print(f"Ошибка получения списка идентификаторов: {e}")
+                    continue
         print()
     finally:
         if mock_srv:
