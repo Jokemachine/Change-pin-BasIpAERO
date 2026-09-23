@@ -102,10 +102,11 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
     Works in any country, with any standard Google account.
     """
 
-    def __init__(self, web_app_url: str, api_key: str = "", timeout: int = 15):
+    def __init__(self, web_app_url: str, api_key: str = "", timeout: int = 15, worksheet_name: str = "Временные коды"):
         self.web_app_url = web_app_url.strip()
         self.api_key = api_key.strip()
         self.timeout = timeout
+        self.worksheet_name = worksheet_name.strip() if worksheet_name else "Временные коды"
         if not self.web_app_url:
             raise ValueError("Google Apps Script web_app_url cannot be empty")
 
@@ -114,8 +115,10 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
         params = {"action": "get_users"}
         if self.api_key:
             params["api_key"] = self.api_key
+        if self.worksheet_name:
+            params["sheet_name"] = self.worksheet_name
 
-        logger.debug("Requesting users from Google Apps Script: %s", self.web_app_url)
+        logger.debug("Requesting users from Google Apps Script: %s (sheet=%s)", self.web_app_url, self.worksheet_name)
         resp = requests.get(self.web_app_url, params=params, timeout=self.timeout, allow_redirects=True)
         if resp.status_code != 200:
             raise RuntimeError(f"Google Apps Script returned status {resp.status_code}: {resp.text}")
@@ -123,6 +126,9 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
         data = resp.json()
         if not data.get("success", False) and "users" not in data:
             raise RuntimeError(f"Google Apps Script error: {data.get('error', 'Unknown error')}")
+
+        accessed_sheet = data.get("sheet_name", self.worksheet_name)
+        logger.info("Reading data from sheet tab: '%s'", accessed_sheet)
 
         raw_users = data.get("users", [])
         users: List[AccessCodeUser] = []
@@ -209,6 +215,7 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
 
         payload = {
             "action": "update_code",
+            "sheet_name": self.worksheet_name,
             "user_id": user.user_id,
             "name": user.name,
             "email": user.email,

@@ -35,11 +35,12 @@ google_sheets:
   # URL веб-приложения из меню: Расширения -> Apps Script -> Развернуть -> Веб-приложение
   gas_web_app_url: "https://script.google.com/macros/s/ВАШ_SCRIPT_ID/exec"
   gas_api_key: ""                      # Опциональный ключ безопасности (если задан в Code.gs)
+  worksheet_name: "Временные коды"     # Название вкладки в Google Таблице
 
   # Для AppSheet (если используется https://www.appsheet.com)
   appsheet_app_id: ""
   appsheet_access_key: ""
-  appsheet_table_name: "Коды доступа"
+  appsheet_table_name: "Временные коды"
 
   # Для Google Cloud Console Service Account (если доступен GCP)
   credentials_json: "service_account.json"

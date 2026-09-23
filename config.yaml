@@ -25,12 +25,12 @@ google_sheets:
   backend_type: "google_apps_script"
   gas_web_app_url: "https://script.google.com/macros/s/AKfycbwVheDx1OHq5r_7bvAsOsRHpPS3XbvGfcKzTRhMwP43OoLaIef0Lpx-12dV9--WHYEo/exec"
   gas_api_key: ""
+  worksheet_name: "Временные коды"    # Точное название вкладки в Google Таблице
   appsheet_app_id: ""
   appsheet_access_key: ""
-  appsheet_table_name: "Коды доступа"
+  appsheet_table_name: "Временные коды"
   credentials_json: "service_account.json"
   spreadsheet_id_or_title: "BAS-IP Access Codes"
-  worksheet_name: "Коды доступа"
   csv_fallback_path: "users_access_codes.csv"
 
 # Отправка писем через Google Mail (Gmail SMTP)

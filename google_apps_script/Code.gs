@@ -47,7 +47,23 @@ function handleRequest(params) {
   }
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getActiveSheet();
+
+  // Выбор нужной вкладки (по умолчанию "Временные коды" или переданное в параметрах)
+  var requestedSheet = params.sheet_name || params.worksheet_name || "Временные коды";
+  var sheet = ss.getSheetByName(requestedSheet);
+  if (!sheet) {
+    var allSheets = ss.getSheets();
+    for (var s = 0; s < allSheets.length; s++) {
+      if (allSheets[s].getName().trim().toLowerCase() === requestedSheet.trim().toLowerCase()) {
+        sheet = allSheets[s];
+        break;
+      }
+    }
+  }
+  if (!sheet) {
+    sheet = ss.getActiveSheet();
+  }
+
   var action = params.action || "get_users";
 
   // 1. Получение списка пользователей
@@ -56,6 +72,7 @@ function handleRequest(params) {
     if (data.length <= 1) {
       return ContentService.createTextOutput(JSON.stringify({
         success: true,
+        sheet_name: sheet.getName(),
         users: []
       })).setMimeType(ContentService.MimeType.JSON);
     }
@@ -139,6 +156,7 @@ function handleRequest(params) {
 
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
+      sheet_name: sheet.getName(),
       headers: headers,
       users: users
     })).setMimeType(ContentService.MimeType.JSON);

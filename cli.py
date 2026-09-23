@@ -75,6 +75,7 @@ def create_components(config: AppConfig, mock_panel_server: bool = False):
             sheets_backend = GoogleAppsScriptBackend(
                 web_app_url=config.sheets.gas_web_app_url,
                 api_key=config.sheets.gas_api_key,
+                worksheet_name=config.sheets.worksheet_name or "Временные коды",
             )
         else:
             logger.warning(
