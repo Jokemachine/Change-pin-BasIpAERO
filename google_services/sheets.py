@@ -119,7 +119,20 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
             params["sheet_name"] = self.worksheet_name
 
         logger.debug("Requesting users from Google Apps Script: %s (sheet=%s)", self.web_app_url, self.worksheet_name)
-        resp = requests.get(self.web_app_url, params=params, timeout=self.timeout, allow_redirects=True)
+        try:
+            resp = requests.get(self.web_app_url, params=params, timeout=self.timeout, allow_redirects=True)
+        except requests.exceptions.ConnectionError as e:
+            err_str = str(e)
+            if "getaddrinfo failed" in err_str or "NameResolutionError" in err_str:
+                raise RuntimeError(
+                    "Ошибка подключения к Google (DNS [Errno 11002]): компьютер не может связаться с 'script.google.com'.\n"
+                    "Возможные причины:\n"
+                    "1. Компьютер подключен к локальной сети домофонов (172.39.x.x), где нет выхода в интернет.\n"
+                    "2. Отсутствует подключение к интернету или сбой DNS-сервера.\n"
+                    "3. Попробуйте выполнить в командной строке: ipconfig /flushdns"
+                ) from None
+            raise
+
         if resp.status_code != 200:
             raise RuntimeError(f"Google Apps Script returned status {resp.status_code}: {resp.text}")
 
@@ -226,10 +239,18 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
         if self.api_key:
             payload["api_key"] = self.api_key
 
-        resp = requests.post(self.web_app_url, json=payload, timeout=self.timeout, allow_redirects=True)
-        if resp.status_code != 200:
-            # Fallback to GET parameters if POST had redirect issue
-            resp = requests.get(self.web_app_url, params=payload, timeout=self.timeout, allow_redirects=True)
+        try:
+            resp = requests.post(self.web_app_url, json=payload, timeout=self.timeout, allow_redirects=True)
+            if resp.status_code != 200:
+                # Fallback to GET parameters if POST had redirect issue
+                resp = requests.get(self.web_app_url, params=payload, timeout=self.timeout, allow_redirects=True)
+        except requests.exceptions.ConnectionError as e:
+            err_str = str(e)
+            if "getaddrinfo failed" in err_str or "NameResolutionError" in err_str:
+                raise RuntimeError(
+                    "Ошибка подключения к Google (DNS [Errno 11002]): нет связи с 'script.google.com'."
+                ) from None
+            raise
 
         if resp.status_code == 200:
             data = resp.json()
