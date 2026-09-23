@@ -4,21 +4,23 @@
 #                    во 2-м и 3-м по 6 двойных подъездов) + 2 калитки = всего 38 панелей
 # ==============================================================================
 
-# Топология вызывных панелей жилого комплекса
+# Файл с индивидуальными настройками для всех 38 панелей (IP-адреса, логины, пароли):
+# Можно использовать "panels.yaml" или "panels.csv" (для Excel):
+panels_file: "panels.yaml"
+
+# Базовая топология вызывных панелей жилого комплекса (если не используется panels_file):
 facility_topology:
-  use_default_38_panels: true  # Автоматически создать топологию из 38 панелей
+  use_default_38_panels: true  # 38 панелей: 2 калитки + 4 дома
   base_ip_prefix: "192.168.1." # Базовая подсеть для панелей домофонов
   start_ip_suffix: 10          # Начальный IP (192.168.1.10 ... 192.168.1.47)
   default_port: 80
   default_username: "admin"
   default_password: "ВашПароль"
 
-# Список панелей (если хотите задать нестандартные IP вручную для каждой панели,
-# раскомментируйте нужные секции. Если basip_panels пуст - берется facility_topology)
+# Список конкретных панелей (если задаются прямо в конфиге):
 basip_panels: []
 
-# Интеграция с Google Таблицами
-# Рекомендуется "google_apps_script", если Google Cloud Console заблокирован в вашей стране
+# Интеграция с Google Таблицами через Google Apps Script
 google_sheets:
   backend_type: "google_apps_script"
   gas_web_app_url: "https://script.google.com/macros/s/AKfycbwVheDx1OHq5r_7bvAsOsRHpPS3XbvGfcKzTRhMwP43OoLaIef0Lpx-12dV9--WHYEo/exec"
@@ -44,12 +46,12 @@ gmail:
 
 # Параметры ротации кодов доступа
 rotation:
-  interval_days: 14            # Смена раз в две недели
-  code_length: 6               # 6-значный PIN
-  avoid_trivial_codes: true    # Исключать тривиальные (123456, 111111)
-  dry_run: false
-  schedule_time: "03:00"
-  check_interval_hours: 12
+  interval_days: 14            # Смена кодов раз в две недели (14 дней)
+  code_length: 6               # Длина цифрового PIN-кода (от 4 до 8 цифр)
+  avoid_trivial_codes: true    # Исключать тривиальные коды (123456, 111111, 654321 и т.д.)
+  dry_run: false               # Режим симуляции (true - только показать, что изменится)
+  schedule_time: "03:00"       # Время суток для автоматической ежедневной проверки (ЧЧ:ММ)
+  check_interval_hours: 12     # Интервал проверки срока кодов (каждые N часов)
 
 use_mock_panel: false
 mock_panel_port: 18080

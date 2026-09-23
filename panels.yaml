@@ -1,0 +1,415 @@
+# ==============================================================================
+# СПИСОК ВСЕХ 38 ВЫЗЫВНЫХ ПАНЕЛЕЙ BAS-IP AA-14FB
+# Здесь вы можете прописать реальные IP-адреса и пароли для каждой панели комплекса.
+# Если у всех панелей одинаковый пароль и IP идут по порядку,
+# можно также воспользоваться секцией facility_topology в config.yaml.
+# ==============================================================================
+
+# ==============================================================================
+# 🚪 КАЛИТКИ ОБЩЕГО ДОСТУПА (2 шт.) — Доступны ВСЕМ жильцам комплекса
+# ==============================================================================
+- panel_id: "gate_1"
+  name: "Калитка 1 (Северная/Главная)"
+  is_gate: true
+  host: "192.168.1.10"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "gate_2"
+  name: "Калитка 2 (Южная/Въезд)"
+  is_gate: true
+  host: "192.168.1.11"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# ==============================================================================
+# 🏢 ДОМ 1 (3 двойных подъезда = 6 панелей)
+# ==============================================================================
+# --- Подъезд 1 ---
+- panel_id: "d1_p1_a"
+  name: "Дом 1, Подъезд 1 (Внешняя дверь)"
+  building: 1
+  entrance: 1
+  door: "A"
+  host: "192.168.1.12"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d1_p1_b"
+  name: "Дом 1, Подъезд 1 (Внутренняя дверь)"
+  building: 1
+  entrance: 1
+  door: "B"
+  host: "192.168.1.13"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 2 ---
+- panel_id: "d1_p2_a"
+  name: "Дом 1, Подъезд 2 (Внешняя дверь)"
+  building: 1
+  entrance: 2
+  door: "A"
+  host: "192.168.1.14"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d1_p2_b"
+  name: "Дом 1, Подъезд 2 (Внутренняя дверь)"
+  building: 1
+  entrance: 2
+  door: "B"
+  host: "192.168.1.15"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 3 ---
+- panel_id: "d1_p3_a"
+  name: "Дом 1, Подъезд 3 (Внешняя дверь)"
+  building: 1
+  entrance: 3
+  door: "A"
+  host: "192.168.1.16"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d1_p3_b"
+  name: "Дом 1, Подъезд 3 (Внутренняя дверь)"
+  building: 1
+  entrance: 3
+  door: "B"
+  host: "192.168.1.17"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# ==============================================================================
+# 🏢 ДОМ 2 (6 двойных подъездов = 12 панелей)
+# ==============================================================================
+# --- Подъезд 1 ---
+- panel_id: "d2_p1_a"
+  name: "Дом 2, Подъезд 1 (Внешняя дверь)"
+  building: 2
+  entrance: 1
+  door: "A"
+  host: "192.168.1.18"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d2_p1_b"
+  name: "Дом 2, Подъезд 1 (Внутренняя дверь)"
+  building: 2
+  entrance: 1
+  door: "B"
+  host: "192.168.1.19"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 2 ---
+- panel_id: "d2_p2_a"
+  name: "Дом 2, Подъезд 2 (Внешняя дверь)"
+  building: 2
+  entrance: 2
+  door: "A"
+  host: "192.168.1.20"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d2_p2_b"
+  name: "Дом 2, Подъезд 2 (Внутренняя дверь)"
+  building: 2
+  entrance: 2
+  door: "B"
+  host: "192.168.1.21"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 3 ---
+- panel_id: "d2_p3_a"
+  name: "Дом 2, Подъезд 3 (Внешняя дверь)"
+  building: 2
+  entrance: 3
+  door: "A"
+  host: "192.168.1.22"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d2_p3_b"
+  name: "Дом 2, Подъезд 3 (Внутренняя дверь)"
+  building: 2
+  entrance: 3
+  door: "B"
+  host: "192.168.1.23"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 4 ---
+- panel_id: "d2_p4_a"
+  name: "Дом 2, Подъезд 4 (Внешняя дверь)"
+  building: 2
+  entrance: 4
+  door: "A"
+  host: "192.168.1.24"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d2_p4_b"
+  name: "Дом 2, Подъезд 4 (Внутренняя дверь)"
+  building: 2
+  entrance: 4
+  door: "B"
+  host: "192.168.1.25"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 5 ---
+- panel_id: "d2_p5_a"
+  name: "Дом 2, Подъезд 5 (Внешняя дверь)"
+  building: 2
+  entrance: 5
+  door: "A"
+  host: "192.168.1.26"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d2_p5_b"
+  name: "Дом 2, Подъезд 5 (Внутренняя дверь)"
+  building: 2
+  entrance: 5
+  door: "B"
+  host: "192.168.1.27"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 6 ---
+- panel_id: "d2_p6_a"
+  name: "Дом 2, Подъезд 6 (Внешняя дверь)"
+  building: 2
+  entrance: 6
+  door: "A"
+  host: "192.168.1.28"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d2_p6_b"
+  name: "Дом 2, Подъезд 6 (Внутренняя дверь)"
+  building: 2
+  entrance: 6
+  door: "B"
+  host: "192.168.1.29"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# ==============================================================================
+# 🏢 ДОМ 3 (6 двойных подъездов = 12 панелей)
+# ==============================================================================
+# --- Подъезд 1 ---
+- panel_id: "d3_p1_a"
+  name: "Дом 3, Подъезд 1 (Внешняя дверь)"
+  building: 3
+  entrance: 1
+  door: "A"
+  host: "192.168.1.30"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d3_p1_b"
+  name: "Дом 3, Подъезд 1 (Внутренняя дверь)"
+  building: 3
+  entrance: 1
+  door: "B"
+  host: "192.168.1.31"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 2 ---
+- panel_id: "d3_p2_a"
+  name: "Дом 3, Подъезд 2 (Внешняя дверь)"
+  building: 3
+  entrance: 2
+  door: "A"
+  host: "192.168.1.32"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d3_p2_b"
+  name: "Дом 3, Подъезд 2 (Внутренняя дверь)"
+  building: 3
+  entrance: 2
+  door: "B"
+  host: "192.168.1.33"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 3 ---
+- panel_id: "d3_p3_a"
+  name: "Дом 3, Подъезд 3 (Внешняя дверь)"
+  building: 3
+  entrance: 3
+  door: "A"
+  host: "192.168.1.34"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d3_p3_b"
+  name: "Дом 3, Подъезд 3 (Внутренняя дверь)"
+  building: 3
+  entrance: 3
+  door: "B"
+  host: "192.168.1.35"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 4 ---
+- panel_id: "d3_p4_a"
+  name: "Дом 3, Подъезд 4 (Внешняя дверь)"
+  building: 3
+  entrance: 4
+  door: "A"
+  host: "192.168.1.36"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d3_p4_b"
+  name: "Дом 3, Подъезд 4 (Внутренняя дверь)"
+  building: 3
+  entrance: 4
+  door: "B"
+  host: "192.168.1.37"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 5 ---
+- panel_id: "d3_p5_a"
+  name: "Дом 3, Подъезд 5 (Внешняя дверь)"
+  building: 3
+  entrance: 5
+  door: "A"
+  host: "192.168.1.38"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d3_p5_b"
+  name: "Дом 3, Подъезд 5 (Внутренняя дверь)"
+  building: 3
+  entrance: 5
+  door: "B"
+  host: "192.168.1.39"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 6 ---
+- panel_id: "d3_p6_a"
+  name: "Дом 3, Подъезд 6 (Внешняя дверь)"
+  building: 3
+  entrance: 6
+  door: "A"
+  host: "192.168.1.40"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d3_p6_b"
+  name: "Дом 3, Подъезд 6 (Внутренняя дверь)"
+  building: 3
+  entrance: 6
+  door: "B"
+  host: "192.168.1.41"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# ==============================================================================
+# 🏢 ДОМ 4 (3 двойных подъезда = 6 панелей)
+# ==============================================================================
+# --- Подъезд 1 ---
+- panel_id: "d4_p1_a"
+  name: "Дом 4, Подъезд 1 (Внешняя дверь)"
+  building: 4
+  entrance: 1
+  door: "A"
+  host: "192.168.1.42"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d4_p1_b"
+  name: "Дом 4, Подъезд 1 (Внутренняя дверь)"
+  building: 4
+  entrance: 1
+  door: "B"
+  host: "192.168.1.43"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 2 ---
+- panel_id: "d4_p2_a"
+  name: "Дом 4, Подъезд 2 (Внешняя дверь)"
+  building: 4
+  entrance: 2
+  door: "A"
+  host: "192.168.1.44"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d4_p2_b"
+  name: "Дом 4, Подъезд 2 (Внутренняя дверь)"
+  building: 4
+  entrance: 2
+  door: "B"
+  host: "192.168.1.45"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+# --- Подъезд 3 ---
+- panel_id: "d4_p3_a"
+  name: "Дом 4, Подъезд 3 (Внешняя дверь)"
+  building: 4
+  entrance: 3
+  door: "A"
+  host: "192.168.1.46"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"
+
+- panel_id: "d4_p3_b"
+  name: "Дом 4, Подъезд 3 (Внутренняя дверь)"
+  building: 4
+  entrance: 3
+  door: "B"
+  host: "192.168.1.47"
+  port: 80
+  username: "admin"
+  password: "ВашПароль"

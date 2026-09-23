@@ -9,7 +9,11 @@ from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
 
 from basip.models import BASIPPanelConfig
-from basip.topology import generate_default_38_panels
+from basip.topology import (
+    generate_default_38_panels,
+    load_panels_from_yaml,
+    load_panels_from_csv,
+)
 
 load_dotenv()
 
@@ -75,26 +79,16 @@ def load_config(config_path: str = "config.yaml") -> AppConfig:
 
     # 1. Panels config
     panels_list = []
-    yaml_panels = yaml_data.get("basip_panels", [])
-    topo_config = yaml_data.get("facility_topology", {})
-    use_38_panels = topo_config.get("use_default_38_panels", True) if topo_config else ("facility_topology" in yaml_data or not yaml_panels)
+    panels_file = yaml_data.get("panels_file") or os.getenv("PANELS_FILE")
+    yaml_panels = yaml_data.get("basip_panels") or yaml_data.get("panels", [])
+    topo_config = yaml_data.get("facility_topology")
 
-    if use_38_panels and not yaml_panels:
-        # Auto-generate 38 panels (4 houses with double entrances + 2 gates)
-        prefix = topo_config.get("base_ip_prefix", os.getenv("BASIP_IP_PREFIX", "192.168.1."))
-        start_suffix = int(topo_config.get("start_ip_suffix", os.getenv("BASIP_START_IP_SUFFIX", 10)))
-        port = int(topo_config.get("default_port", os.getenv("BASIP_PORT", 80)))
-        user = topo_config.get("default_username", os.getenv("BASIP_USER", "admin"))
-        pwd = topo_config.get("default_password", os.getenv("BASIP_PASSWORD", "123456"))
-
-        panels_list = generate_default_38_panels(
-            base_ip_prefix=prefix,
-            start_ip_suffix=start_suffix,
-            default_port=port,
-            default_username=user,
-            default_password=pwd,
-        )
-    elif isinstance(yaml_panels, list) and yaml_panels:
+    if panels_file and os.path.exists(panels_file):
+        if panels_file.endswith(".csv"):
+            panels_list = load_panels_from_csv(panels_file)
+        else:
+            panels_list = load_panels_from_yaml(panels_file)
+    elif isinstance(yaml_panels, list) and len(yaml_panels) > 0:
         for p in yaml_panels:
             panels_list.append(
                 BASIPPanelConfig(
@@ -116,24 +110,28 @@ def load_config(config_path: str = "config.yaml") -> AppConfig:
                     timeout=int(p.get("timeout", 8)),
                 )
             )
-    else:
-        # Default single panel from env or defaults
-        host = os.getenv("BASIP_HOST", "192.168.1.100")
-        port = int(os.getenv("BASIP_PORT", "80"))
-        username = os.getenv("BASIP_USER", "admin")
-        password = os.getenv("BASIP_PASSWORD", "123456")
-        use_https = os.getenv("BASIP_USE_HTTPS", "false").lower() in ("true", "1")
-        panels_list.append(
-            BASIPPanelConfig(
-                panel_id="panel_1",
-                name="Входная панель",
-                host=host,
-                port=port,
-                username=username,
-                password=password,
-                use_https=use_https,
-            )
+    elif topo_config is not None and topo_config.get("use_default_38_panels", True):
+        # Auto-generate 38 panels (4 houses with double entrances + 2 gates)
+        prefix = topo_config.get("base_ip_prefix", os.getenv("BASIP_IP_PREFIX", "192.168.1."))
+        start_suffix = int(topo_config.get("start_ip_suffix", os.getenv("BASIP_START_IP_SUFFIX", 10)))
+        port = int(topo_config.get("default_port", os.getenv("BASIP_PORT", 80)))
+        user = topo_config.get("default_username", os.getenv("BASIP_USER", "admin"))
+        pwd = topo_config.get("default_password", os.getenv("BASIP_PASSWORD", "123456"))
+
+        panels_list = generate_default_38_panels(
+            base_ip_prefix=prefix,
+            start_ip_suffix=start_suffix,
+            default_port=port,
+            default_username=user,
+            default_password=pwd,
         )
+    elif os.path.exists("panels.yaml"):
+        panels_list = load_panels_from_yaml("panels.yaml")
+    elif os.path.exists("panels.csv"):
+        panels_list = load_panels_from_csv("panels.csv")
+    else:
+        # Fallback to auto-generating 38 panels with standard defaults
+        panels_list = generate_default_38_panels()
 
     # 2. Sheets config
     yaml_sheets = yaml_data.get("google_sheets", {})

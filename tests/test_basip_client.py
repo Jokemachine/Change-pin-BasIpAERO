@@ -5,7 +5,12 @@ import pytest
 from basip.client import BASIPClient, BASIPManager
 from basip.mock_panel import MockBASIPServer
 from basip.models import BASIPPanelConfig, AccessCodeUser
-from basip.topology import generate_default_38_panels
+from basip.topology import (
+    generate_default_38_panels,
+    load_panels_from_yaml,
+    load_panels_from_csv,
+    save_panels_to_csv,
+)
 
 
 @pytest.fixture(scope="module")
@@ -150,3 +155,24 @@ def test_user_panel_access_rules():
     )
     target_admin = manager.get_target_panels_for_user(u_admin)
     assert len(target_admin) == 38
+
+
+def test_yaml_and_csv_panel_loading(tmp_path):
+    """Test loading and saving panels from YAML and CSV files."""
+    # Test loading pre-made panels.yaml
+    panels_yaml = load_panels_from_yaml("panels.yaml")
+    assert len(panels_yaml) == 38
+    assert panels_yaml[0].panel_id == "gate_1"
+    assert panels_yaml[0].is_gate is True
+
+    # Test saving to CSV and loading back
+    csv_file = tmp_path / "test_panels.csv"
+    save_panels_to_csv(panels_yaml, str(csv_file))
+    loaded_csv = load_panels_from_csv(str(csv_file))
+    assert len(loaded_csv) == 38
+    assert loaded_csv[0].panel_id == "gate_1"
+    assert loaded_csv[0].is_gate is True
+    assert loaded_csv[2].panel_id == "d1_p1_a"
+    assert loaded_csv[2].building == 1
+    assert loaded_csv[2].entrance == 1
+
