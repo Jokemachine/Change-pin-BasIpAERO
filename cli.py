@@ -212,9 +212,25 @@ def cmd_test_panel(args, config: AppConfig):
     try:
         print("\n--- Проверка подключения к панелям BAS-IP AA14FB ---")
         results = manager.test_all_connections()
-        for panel, ok in results.items():
-            status = "ДОСТУПНА И АВТОРИЗОВАНА" if ok else "ОШИБКА ПОДКЛЮЧЕНИЯ"
-            print(f"Панель {panel}: {status}")
+        available_count = 0
+        for panel, res in results.items():
+            if isinstance(res, tuple):
+                ok, reason = res
+            else:
+                ok, reason = res, ""
+            if ok:
+                available_count += 1
+                status = "ДОСТУПНА И АВТОРИЗОВАНА"
+            else:
+                status = f"ОШИБКА ПОДКЛЮЧЕНИЯ -> {reason}"
+            print(f"[{'✓' if ok else '✗'}] {panel}: {status}")
+
+        print(f"\nИтого доступно панелей: {available_count} из {len(results)}")
+        if available_count == 0:
+            print("\nВНИМАНИЕ: Ни одна панель не ответила! Возможные причины:")
+            print("1. Компьютер не находится в локальной подсети 172.39.x.x (проверьте IP вашего ПК: ipconfig).")
+            print("2. Кабель не подключен к коммутатору домофонов или отключено питание панелей.")
+            print("3. Брандмауэр блокирует обращение к подсети 172.39.x.x.\n")
 
         if any(results.values()):
             # Display current identifiers

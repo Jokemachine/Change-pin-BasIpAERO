@@ -131,15 +131,26 @@ class BASIPClient:
 
         return response
 
-    def check_connection(self) -> bool:
+    def check_connection(self, return_detail: bool = False):
         """Verify panel availability and authorization."""
         try:
             self.login()
             resp = self._request("GET", "/access/identifier/items", params={"items_limit": 1})
-            return resp.status_code in (200, 204)
+            if resp.status_code in (200, 204):
+                return (True, "Доступна и авторизована") if return_detail else True
+            msg = f"Ошибка HTTP {resp.status_code}: {resp.text[:120]}"
+            return (False, msg) if return_detail else False
         except Exception as e:
-            logger.error("BAS-IP connection check failed: %s", e)
-            return False
+            err_msg = str(e)
+            if "timed out" in err_msg.lower():
+                msg = "Таймаут подключения (панель недоступна по сети)"
+            elif "connection refused" in err_msg.lower():
+                msg = "Соединение отклонено (порт закрыт или панель перезагружается)"
+            elif "no route to host" in err_msg.lower() or "10051" in err_msg or "10065" in err_msg:
+                msg = "Нет сетевого маршрута к IP (компьютер не в подсети 172.39.x.x)"
+            else:
+                msg = err_msg
+            return (False, msg) if return_detail else False
 
     def get_identifiers(self, page: int = 1, limit: int = 100) -> List[Identifier]:
         """Fetch list of identifiers stored on the panel."""
@@ -218,40 +229,62 @@ class BASIPClient:
         name: str,
         lock_number: Optional[int] = None,
         link_id: Optional[int] = None,
+        apartment_number: Optional[str] = None,
     ) -> Identifier:
         """
         Create a new access code identifier on the BAS-IP panel.
         POST /access/identifier
+        Supports multiple identifier_type variants (input_code, access_code, code)
+        to work seamlessly across different BAS-IP firmware versions.
         """
         lock = lock_number if lock_number is not None else self.config.lock_number
-        payload: Dict[str, Any] = {
-            "identifier_type": "input_code",
-            "identifier_number": str(code),
-            "name": name,
-            "lock_number": lock,
-        }
-        if link_id is not None:
-            payload["link_id"] = link_id
+        type_candidates = ["input_code", "access_code", "code"]
+        last_resp = None
 
-        resp = self._request("POST", "/access/identifier", json=payload)
-        if resp.status_code not in (200, 201):
-            raise BASIPError(f"Failed to create identifier: HTTP {resp.status_code} - {resp.text}")
+        for id_type in type_candidates:
+            payload: Dict[str, Any] = {
+                "identifier_type": id_type,
+                "identifier_number": str(code),
+                "name": name,
+                "lock_number": lock,
+            }
+            if link_id is not None:
+                payload["link_id"] = link_id
+            if apartment_number:
+                payload["apartment_number"] = str(apartment_number)
 
-        res_data = resp.json() if resp.text else {}
-        uid = None
-        if isinstance(res_data, dict):
-            uid = res_data.get("id") or res_data.get("item_uid") or res_data.get("uid")
+            resp = self._request("POST", "/access/identifier", json=payload)
+            if resp.status_code in (200, 201):
+                res_data = resp.json() if resp.text else {}
+                uid = None
+                if isinstance(res_data, dict):
+                    uid = res_data.get("id") or res_data.get("item_uid") or res_data.get("uid")
 
-        logger.info("Created access code identifier for '%s' (uid=%s) on panel %s", name, uid, self.config.host)
-        return Identifier(
-            identifier_number=str(code),
-            identifier_type="input_code",
-            name=name,
-            item_uid=int(uid) if uid is not None else None,
-            link_id=link_id,
-            lock_number=lock,
-            raw_data=res_data if isinstance(res_data, dict) else {},
-        )
+                logger.info(
+                    "Created access code identifier for '%s' (uid=%s, type=%s) on panel %s",
+                    name,
+                    uid,
+                    id_type,
+                    self.config.host,
+                )
+                return Identifier(
+                    identifier_number=str(code),
+                    identifier_type=id_type,
+                    name=name,
+                    item_uid=int(uid) if uid is not None else None,
+                    link_id=link_id,
+                    lock_number=lock,
+                    apartment_number=apartment_number,
+                    raw_data=res_data if isinstance(res_data, dict) else {},
+                )
+            last_resp = resp
+            if resp.status_code not in (400, 422):
+                # Don't retry if it's 401 or 403 or 500
+                break
+
+        err_text = last_resp.text[:200] if last_resp else "Unknown error"
+        status_code = last_resp.status_code if last_resp else 500
+        raise BASIPError(f"Failed to create identifier on {self.config.host}: HTTP {status_code} - {err_text}")
 
     def update_identifier(
         self,
@@ -302,6 +335,7 @@ class BASIPClient:
         new_code: str,
         old_code: Optional[str] = None,
         link_id: Optional[int] = None,
+        apartment_number: Optional[str] = None,
     ) -> Identifier:
         """
         High-level method to set or update a user's access code on the panel.
@@ -329,6 +363,7 @@ class BASIPClient:
             name=name,
             lock_number=self.config.lock_number,
             link_id=link_id,
+            apartment_number=apartment_number,
         )
 
 
@@ -345,26 +380,25 @@ class BASIPManager:
         self.clients = {p.panel_id: BASIPClient(p) for p in panels}
         self.max_workers = max_workers
 
-    def test_all_connections(self, max_workers: Optional[int] = None) -> Dict[str, bool]:
+    def test_all_connections(self, max_workers: Optional[int] = None) -> Dict[str, Any]:
         """Test connection to every configured panel concurrently."""
-        results: Dict[str, bool] = {}
+        results: Dict[str, Any] = {}
         workers = max_workers or min(self.max_workers, len(self.clients) or 1)
 
         def _check_panel(item):
             pid, client = item
-            key = f"{pid} ({client.config.location_str})"
+            key = f"{pid} [{client.config.location_str}] ({client.config.host}:{client.config.port})"
             try:
-                ok = client.check_connection()
-                return key, ok
+                ok, reason = client.check_connection(return_detail=True)
+                return key, ok, reason
             except Exception as e:
-                logger.error("Connection failed for %s (%s): %s", pid, client.config.host, e)
-                return key, False
+                return key, False, str(e)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             future_to_panel = {executor.submit(_check_panel, item): item for item in self.clients.items()}
             for future in concurrent.futures.as_completed(future_to_panel):
-                key, ok = future.result()
-                results[key] = ok
+                key, ok, reason = future.result()
+                results[key] = (ok, reason)
 
         return results
 
@@ -379,21 +413,23 @@ class BASIPManager:
         old_code: Optional[str] = None,
         link_id: Optional[int] = None,
         user: Optional[AccessCodeUser] = None,
-    ) -> Dict[str, bool]:
+    ) -> Dict[str, Any]:
         """
         Sync a user's new access code to their assigned entrance panels and communal gates.
-        If user object is provided, only panels matching user's access permissions are updated.
+        Returns a dict of panel_desc -> (success: bool, error_detail: str).
         """
         if user is not None:
             target_configs = self.get_target_panels_for_user(user)
+            apartment = user.apartment
         else:
             target_configs = [p for p in self.panels if p.enabled]
+            apartment = None
 
         if not target_configs:
             logger.warning("No target panels found for user '%s'", name)
             return {}
 
-        results: Dict[str, bool] = {}
+        results: Dict[str, Any] = {}
         workers = min(self.max_workers, len(target_configs) or 1)
 
         def _sync_single(panel_cfg: BASIPPanelConfig):
@@ -406,16 +442,18 @@ class BASIPManager:
                     new_code=new_code,
                     old_code=old_code,
                     link_id=link_id,
+                    apartment_number=apartment,
                 )
-                return desc, True
+                return desc, True, ""
             except Exception as e:
-                logger.error("Failed to sync code for '%s' to panel %s (%s): %s", name, pid, panel_cfg.host, e)
-                return desc, False
+                err_detail = str(e)
+                logger.error("Failed to sync code for '%s' to panel %s (%s): %s", name, pid, panel_cfg.host, err_detail)
+                return desc, False, err_detail
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             future_to_panel = {executor.submit(_sync_single, p): p for p in target_configs}
             for future in concurrent.futures.as_completed(future_to_panel):
-                desc, ok = future.result()
-                results[desc] = ok
+                desc, ok, err_detail = future.result()
+                results[desc] = (ok, err_detail)
 
         return results

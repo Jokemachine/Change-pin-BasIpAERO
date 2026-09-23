@@ -204,14 +204,27 @@ class PINRotator:
                 user=user,
             )
 
-            # Check if panel updates succeeded
-            failed_panels = [p for p, ok in panel_results.items() if not ok]
-            succeeded_panels = [p for p, ok in panel_results.items() if ok]
+            failed_panels = []
+            succeeded_panels = []
+            failed_details = []
+
+            for p, res in panel_results.items():
+                if isinstance(res, tuple):
+                    ok, detail = res
+                else:
+                    ok, detail = res, ""
+                if ok:
+                    succeeded_panels.append(p)
+                else:
+                    failed_panels.append(p)
+                    if detail:
+                        failed_details.append(f"{p} ({detail})")
 
             if not panel_results:
                 logger.warning("No target panels found or configured for user '%s'", user.name)
             elif failed_panels and not succeeded_panels:
-                err_msg = f"Failed to update BAS-IP panels: {', '.join(failed_panels)}"
+                detail_summary = "; ".join(failed_details) if failed_details else ", ".join(failed_panels)
+                err_msg = f"Failed to update BAS-IP panels: {detail_summary}"
                 logger.error("User '%s': %s", user.name, err_msg)
                 report.failed_count += 1
                 report.results.append(
@@ -229,7 +242,7 @@ class PINRotator:
                 self.sheets_backend.update_user_code(
                     user=user,
                     new_code=old_code,
-                    status=f"Ошибка домофона: {', '.join(failed_panels[:3])}",
+                    status=f"Ошибка домофона: {', '.join(failed_panels[:2])}",
                 )
                 continue
 
