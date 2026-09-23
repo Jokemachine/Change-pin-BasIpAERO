@@ -67,8 +67,17 @@ class MockBASIPRequestHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"token": token, "account_type": "admin"})
             return self._send_json(401, {"error": "Invalid credentials"})
 
-        # Identifiers list: /api/v1/access/identifier/items
-        if "/access/identifier/items" in path:
+        # Device info: /api/info
+        if path.endswith("/api/info") or path.endswith("/info"):
+            return self._send_json(200, {
+                "device_model": "AA-14FB",
+                "firmware_version": "1.7.0",
+                "api_version": "1.7.0",
+                "device_name": "AA-14FB Entrance Panel",
+            })
+
+        # Identifiers list: /access/identifiers/items/list or /access/identifier/items or /access/identifiers
+        if any(p in path for p in ("/access/identifiers/items/list", "/access/identifier/items", "/access/identifiers")):
             if not self._check_auth():
                 return self._send_json(401, {"error": "Unauthorized"})
 
@@ -85,12 +94,13 @@ class MockBASIPRequestHandler(BaseHTTPRequestHandler):
                 }
             })
 
-        # Single identifier: /access/identifier/item/{uid}
-        if "/access/identifier/item/" in path:
+        # Single identifier: /access/identifiers/item/{uid} or /access/identifier/item/{uid}
+        if "/access/identifiers/item/" in path or "/access/identifier/item/" in path:
             if not self._check_auth():
                 return self._send_json(401, {"error": "Unauthorized"})
             try:
-                uid = int(path.split("/access/identifier/item/")[1].split("/")[0])
+                base_part = "/access/identifiers/item/" if "/access/identifiers/item/" in path else "/access/identifier/item/"
+                uid = int(path.split(base_part)[1].split("/")[0])
                 if uid in self.identifiers:
                     return self._send_json(200, self.identifiers[uid])
                 return self._send_json(404, {"error": "Identifier not found"})
@@ -120,21 +130,45 @@ class MockBASIPRequestHandler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return self._send_json(401, {"error": "Unauthorized"})
 
-        # Create identifier: /access/identifier
-        if path.endswith("/access/identifier"):
+        # Create identifier: /access/identifiers/item or /access/identifier or /access/identifiers
+        if any(path.endswith(ep) for ep in ("/access/identifiers/item", "/access/identifier", "/access/identifiers")):
             uid = MockBASIPRequestHandler.next_uid
             MockBASIPRequestHandler.next_uid += 1
 
+            # Extract name and owner
+            owner_obj = body.get("identifier_owner")
+            if isinstance(owner_obj, dict):
+                owner_name = owner_obj.get("name", "")
+                owner_type = owner_obj.get("type", "owner")
+            else:
+                owner_name = str(body.get("name") or owner_obj or "")
+                owner_type = "owner"
+
+            lock_val = body.get("lock", body.get("lock_number", 1))
+
             identifier_item = {
+                "identifier_id": uid,
+                "identifier_uid": uid,
                 "item_uid": uid,
-                "identifier_type": body.get("identifier_type", "input_code"),
+                "identifier_type": body.get("identifier_type", "inputCode"),
                 "identifier_number": str(body.get("identifier_number", "")),
-                "name": body.get("name", ""),
-                "lock_number": body.get("lock_number", 1),
+                "identifier_owner": {
+                    "name": owner_name,
+                    "type": owner_type,
+                },
+                "name": owner_name,
+                "lock": lock_val,
+                "lock_number": 2 if lock_val == "second" else 1,
                 "link_id": body.get("link_id"),
             }
             MockBASIPRequestHandler.identifiers[uid] = identifier_item
-            return self._send_json(201, {"id": uid, "item_uid": uid, "message": "Identifier created"})
+            return self._send_json(201, {
+                "uid": uid,
+                "id": uid,
+                "item_uid": uid,
+                "identifier_uid": uid,
+                "message": "Identifier created",
+            })
 
         return self._send_json(404, {"error": "Not Found"})
 
@@ -145,9 +179,10 @@ class MockBASIPRequestHandler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return self._send_json(401, {"error": "Unauthorized"})
 
-        if "/access/identifier/item/" in path:
+        if "/access/identifiers/item/" in path or "/access/identifier/item/" in path:
             try:
-                uid = int(path.split("/access/identifier/item/")[1].split("/")[0])
+                base_part = "/access/identifiers/item/" if "/access/identifiers/item/" in path else "/access/identifier/item/"
+                uid = int(path.split(base_part)[1].split("/")[0])
                 if uid not in self.identifiers:
                     return self._send_json(404, {"error": "Identifier not found"})
 
@@ -156,12 +191,24 @@ class MockBASIPRequestHandler(BaseHTTPRequestHandler):
                 body = json.loads(post_data.decode("utf-8")) if post_data else {}
 
                 item = self.identifiers[uid]
-                if "identifier_number" in body:
-                    item["identifier_number"] = str(body["identifier_number"])
-                if "name" in body:
-                    item["name"] = body["name"]
-                if "lock_number" in body:
-                    item["lock_number"] = body["lock_number"]
+                base_info = body.get("base", body)
+
+                if "identifier_number" in base_info:
+                    item["identifier_number"] = str(base_info["identifier_number"])
+
+                owner_info = base_info.get("identifier_owner")
+                if isinstance(owner_info, dict) and "name" in owner_info:
+                    item["identifier_owner"]["name"] = owner_info["name"]
+                    item["name"] = owner_info["name"]
+                elif "name" in base_info:
+                    item["name"] = base_info["name"]
+                    if "identifier_owner" in item and isinstance(item["identifier_owner"], dict):
+                        item["identifier_owner"]["name"] = base_info["name"]
+
+                if "lock" in base_info:
+                    item["lock"] = base_info["lock"]
+                if "lock_number" in base_info:
+                    item["lock_number"] = base_info["lock_number"]
 
                 return self._send_json(200, item)
             except ValueError:
@@ -176,13 +223,18 @@ class MockBASIPRequestHandler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return self._send_json(401, {"error": "Unauthorized"})
 
-        if "/access/identifier/item/" in path:
+        if "/access/identifiers/item/" in path or "/access/identifier/item/" in path or "/access/identifier/" in path:
             try:
-                uid = int(path.split("/access/identifier/item/")[1].split("/")[0])
-                if uid in self.identifiers:
-                    del self.identifiers[uid]
-                    return self._send_json(200, {"message": "Deleted"})
-                return self._send_json(404, {"error": "Identifier not found"})
+                for prefix in ("/access/identifiers/item/", "/access/identifier/item/", "/access/identifier/"):
+                    if prefix in path:
+                        uid_str = path.split(prefix)[1].split("/")[0]
+                        if uid_str.isdigit():
+                            uid = int(uid_str)
+                            if uid in self.identifiers:
+                                del self.identifiers[uid]
+                                return self._send_json(200, {"message": "Deleted"})
+                            return self._send_json(404, {"error": "Identifier not found"})
+                return self._send_json(400, {"error": "Invalid UID"})
             except ValueError:
                 return self._send_json(400, {"error": "Invalid UID"})
 

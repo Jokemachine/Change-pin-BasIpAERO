@@ -39,6 +39,12 @@ def test_auth_and_connection_check(client):
     assert client.check_connection() is True
 
 
+def test_device_info(client):
+    info = client.get_device_info()
+    assert info.get("device_model") == "AA-14FB"
+    assert info.get("firmware_version") == "1.7.0"
+
+
 def test_create_and_get_identifier(client):
     ident = client.create_identifier(code="582910", name="Тестовый Жилец", lock_number=1)
     assert ident.identifier_number == "582910"

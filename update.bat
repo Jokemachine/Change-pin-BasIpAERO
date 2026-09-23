@@ -32,6 +32,10 @@ with zipfile.ZipFile(io.BytesIO(data)) as z:
         if not rel_path:
             continue
         target_path = os.path.join('.', rel_path)
+        # Protect local config.yaml from being overwritten if it already exists
+        if rel_path.lower() == 'config.yaml' and os.path.exists(target_path):
+            print('Сохраняем ваш текущий config.yaml (не перезаписывается)')
+            continue
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
         with z.open(member) as src, open(target_path, 'wb') as dst:
             shutil.copyfileobj(src, dst)

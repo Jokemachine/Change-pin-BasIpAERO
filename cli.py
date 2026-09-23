@@ -252,6 +252,63 @@ def cmd_test_panel(args, config: AppConfig):
             mock_srv.stop()
 
 
+def cmd_inspect_panel(args, config: AppConfig):
+    """Deep inspection of a specific BAS-IP AA-14FB panel's API endpoints."""
+    manager, sheets, mailer, rotator, mock_srv = create_components(config, mock_panel_server=args.mock_panel)
+    try:
+        panel_id = args.panel or "gate_1"
+        if panel_id not in manager.clients:
+            panel_id = list(manager.clients.keys())[0]
+
+        client = manager.clients[panel_id]
+        print(f"\n=======================================================")
+        print(f"ГЛУБОКАЯ ДИАГНОСТИКА ПАНЕЛИ: {panel_id}")
+        print(f"Адрес: {client.config.host}:{client.config.port}")
+        print(f"Расположение: {client.config.location_str}")
+        print(f"=======================================================\n")
+
+        print("[1] Авторизация и информация об устройстве (/api/info):")
+        try:
+            client.login()
+            resp = client._request("GET", "/api/info")
+            print(f" -> Статус: HTTP {resp.status_code}")
+            if resp.status_code == 200:
+                print(f" -> Ответ: {resp.text}")
+        except Exception as e:
+            print(f" -> Ошибка: {e}")
+
+        print("\n[2] Проверка списков идентификаторов:")
+        for ep in ["/access/identifiers/items/list", "/access/identifier/items", "/access/identifiers"]:
+            try:
+                resp = client._request("GET", ep, params={"paginationLimit": 5, "items_limit": 5})
+                print(f" -> {ep}: HTTP {resp.status_code}")
+                if resp.status_code == 200:
+                    data = resp.json() if resp.text else {}
+                    items = data.get("list_items", []) if isinstance(data, dict) else data
+                    print(f"    Найдено записей: {len(items)}")
+                    if items:
+                        import json
+                        print(f"    Пример записи: {json.dumps(items[0], ensure_ascii=False, indent=2)}")
+            except Exception as e:
+                print(f" -> {ep}: Ошибка {e}")
+
+        if args.test_pin:
+            print("\n[3] Тестовое создание и удаление PIN-кода '998877'...")
+            try:
+                ident = client.create_identifier(code="998877", name="Тестовый Доступ")
+                print(f" -> УСПЕХ: Код создан! UID={ident.item_uid}, Тип={ident.identifier_type}")
+                if ident.item_uid:
+                    del_ok = client.delete_identifier(ident.item_uid)
+                    print(f" -> Тестовый код успешно удален из памяти панели: {del_ok}")
+            except Exception as e:
+                print(f" -> Ошибка создания: {e}")
+
+        print("\nДиагностика завершена.\n")
+    finally:
+        if mock_srv:
+            mock_srv.stop()
+
+
 def cmd_list_panels(args, config: AppConfig):
     """List all configured panels with their location and parameters."""
     print("\n--- СПИСОК ВЫЗЫВНЫХ ПАНЕЛЕЙ BAS-IP AA14FB (ВСЕГО 38 ПАНЕЛЕЙ) ---")
@@ -349,6 +406,12 @@ def main():
     test_panel_parser = subparsers.add_parser("test-panel", help="Проверить связь с домофоном BAS-IP")
     test_panel_parser.add_argument("--mock-panel", action="store_true", help="Использовать mock BAS-IP")
 
+    # Command: inspect-panel
+    inspect_parser = subparsers.add_parser("inspect-panel", help="Подробная диагностика API выбранной панели")
+    inspect_parser.add_argument("--panel", default="gate_1", help="ID панели для диагностики (по умолчанию gate_1)")
+    inspect_parser.add_argument("--test-pin", action="store_true", help="Попробовать создать и удалить тестовый PIN 998877")
+    inspect_parser.add_argument("--mock-panel", action="store_true", help="Использовать mock BAS-IP")
+
     # Command: list-panels
     subparsers.add_parser("list-panels", help="Вывести список всех 38 панелей домофонов и их расположение")
 
@@ -381,6 +444,8 @@ def main():
         cmd_list_panels(args, config)
     elif args.command == "test-panel":
         cmd_test_panel(args, config)
+    elif args.command == "inspect-panel":
+        cmd_inspect_panel(args, config)
     elif args.command == "test-sheets":
         cmd_test_sheets(args, config)
     elif args.command == "test-email":

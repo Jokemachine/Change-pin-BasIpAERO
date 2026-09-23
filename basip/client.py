@@ -131,14 +131,50 @@ class BASIPClient:
 
         return response
 
+    def get_device_info(self) -> Dict[str, Any]:
+        """Fetch device information from panel (model, firmware, api version)."""
+        for path in ["/api/info", "/frontend/version", "/device/time"]:
+            try:
+                resp = self._request("GET", path)
+                if resp.status_code == 200:
+                    return resp.json() if resp.text else {}
+            except Exception:
+                pass
+        return {}
+
     def check_connection(self, return_detail: bool = False):
         """Verify panel availability and authorization."""
         try:
             self.login()
-            resp = self._request("GET", "/access/identifier/items", params={"items_limit": 1})
-            if resp.status_code in (200, 204):
+            # Try to get device info (AA-14FB /api/info)
+            try:
+                resp = self._request("GET", "/api/info")
+                if resp.status_code == 200:
+                    info = resp.json() if resp.text else {}
+                    model = info.get("device_model") or info.get("device_name") or "AA-14FB"
+                    fw = info.get("firmware_version") or info.get("framework_version") or ""
+                    detail = f"{model} (FW: {fw})" if fw else f"{model} (ОК)"
+                    return (True, detail) if return_detail else True
+            except Exception:
+                pass
+
+            # Try identifier list endpoints
+            for ep, params in [
+                ("/access/identifiers/items/list", {"paginationLimit": 1}),
+                ("/access/identifier/items", {"items_limit": 1}),
+                ("/access/identifiers", {"limit": 1}),
+            ]:
+                try:
+                    resp = self._request("GET", ep, params=params)
+                    if resp.status_code in (200, 204):
+                        return (True, "Доступна и авторизована") if return_detail else True
+                except Exception:
+                    pass
+
+            if self._authenticated:
                 return (True, "Доступна и авторизована") if return_detail else True
-            msg = f"Ошибка HTTP {resp.status_code}: {resp.text[:120]}"
+
+            msg = "Не удалось подтвердить авторизацию"
             return (False, msg) if return_detail else False
         except Exception as e:
             err_msg = str(e)
@@ -154,15 +190,38 @@ class BASIPClient:
 
     def get_identifiers(self, page: int = 1, limit: int = 100) -> List[Identifier]:
         """Fetch list of identifiers stored on the panel."""
-        params = {"current_page": page, "items_limit": limit}
-        resp = self._request("GET", "/access/identifier/items", params=params)
-        if resp.status_code != 200:
-            raise BASIPError(f"Failed to fetch identifiers: HTTP {resp.status_code} - {resp.text}")
+        endpoints = [
+            ("/access/identifiers/items/list", {"paginationPageNumber": page, "paginationLimit": limit}),
+            ("/access/identifier/items", {"current_page": page, "items_limit": limit}),
+            ("/access/identifiers", {"page": page, "limit": limit}),
+        ]
 
-        data = resp.json()
+        last_resp = None
+        for path, params in endpoints:
+            try:
+                resp = self._request("GET", path, params=params)
+                if resp.status_code == 200:
+                    last_resp = resp
+                    break
+            except Exception as e:
+                logger.debug("Panel %s: GET %s failed: %s", self.config.host, path, e)
+                continue
+
+        if last_resp is None or last_resp.status_code != 200:
+            status = last_resp.status_code if last_resp else 500
+            err_text = last_resp.text[:120] if last_resp else "No response"
+            logger.warning("Could not fetch identifiers from panel %s: HTTP %s - %s", self.config.host, status, err_text)
+            return []
+
+        data = last_resp.json() if last_resp.text else {}
         raw_items = []
         if isinstance(data, dict):
-            raw_items = data.get("list_items", []) or data.get("items", []) or data.get("data", [])
+            raw_items = (
+                data.get("list_items")
+                or data.get("items")
+                or data.get("data")
+                or []
+            )
         elif isinstance(data, list):
             raw_items = data
 
@@ -170,27 +229,61 @@ class BASIPClient:
         for item in raw_items:
             if not isinstance(item, dict):
                 continue
-            item_uid = item.get("item_uid") or item.get("id") or item.get("uid")
+            item_uid = (
+                item.get("identifier_uid")
+                or item.get("identifier_id")
+                or item.get("item_uid")
+                or item.get("uid")
+                or item.get("id")
+            )
             link_id = item.get("link_id")
-            num = str(item.get("identifier_number", item.get("code", item.get("number", ""))))
-            id_type = item.get("identifier_type", item.get("type", "input_code"))
-            name = item.get("name", item.get("owner", item.get("user", "")))
-            lock_num = item.get("lock_number", self.config.lock_number)
+            num = str(
+                item.get("identifier_number")
+                or item.get("code")
+                or item.get("number")
+                or ""
+            )
+            id_type = item.get("identifier_type", item.get("type", "inputCode"))
+
+            # Extract name/owner
+            name = ""
+            owner_field = item.get("identifier_owner")
+            if isinstance(owner_field, dict):
+                name = owner_field.get("name", "")
+            elif isinstance(owner_field, str):
+                name = owner_field
+            elif item.get("name"):
+                name = str(item.get("name"))
+            elif item.get("owner"):
+                name = str(item.get("owner"))
+            elif item.get("user"):
+                name = str(item.get("user"))
+
+            lock_val = item.get("lock", item.get("lock_number", self.config.lock_number))
             apt_num = item.get("apartment_number", item.get("apartment", None))
+            if isinstance(apt_num, dict):
+                apt_num = apt_num.get("apartment_name") or apt_num.get("number")
 
             identifiers.append(
                 Identifier(
                     identifier_number=num,
                     identifier_type=id_type,
                     name=name,
-                    item_uid=int(item_uid) if item_uid is not None else None,
-                    link_id=int(link_id) if link_id is not None else None,
-                    lock_number=lock_num,
+                    item_uid=int(item_uid) if item_uid is not None and str(item_uid).isdigit() else None,
+                    link_id=int(link_id) if link_id is not None and str(link_id).isdigit() else None,
+                    lock_number=lock_val if isinstance(lock_val, int) else self.config.lock_number,
                     apartment_number=str(apt_num) if apt_num is not None else None,
                     raw_data=item,
                 )
             )
         return identifiers
+
+    @staticmethod
+    def _is_code_type(t: str) -> bool:
+        if not t:
+            return False
+        clean = t.lower().replace("_", "").replace("-", "")
+        return clean in ("inputcode", "code", "accesscode", "pin", "keypad")
 
     def find_code_identifier(
         self,
@@ -198,9 +291,9 @@ class BASIPClient:
         code: Optional[str] = None,
         link_id: Optional[int] = None,
     ) -> Optional[Identifier]:
-        """Find an existing input_code identifier by name, code or link_id."""
+        """Find an existing input_code / inputCode identifier by name, code or link_id."""
         all_ids = self.get_identifiers(limit=500)
-        code_ids = [i for i in all_ids if i.identifier_type in ("input_code", "code", "access_code")]
+        code_ids = [i for i in all_ids if self._is_code_type(i.identifier_type)]
 
         # Match by link_id if available
         if link_id is not None:
@@ -208,17 +301,17 @@ class BASIPClient:
                 if item.link_id == link_id:
                     return item
 
+        # Match by name (case-insensitive)
+        if name:
+            clean_name = name.strip().lower()
+            for item in code_ids:
+                if item.name and item.name.strip().lower() == clean_name:
+                    return item
+
         # Match by current code
         if code:
             for item in code_ids:
                 if item.identifier_number == code:
-                    return item
-
-        # Match by name
-        if name:
-            clean_name = name.strip().lower()
-            for item in code_ids:
-                if item.name.strip().lower() == clean_name:
                     return item
 
         return None
@@ -233,58 +326,151 @@ class BASIPClient:
     ) -> Identifier:
         """
         Create a new access code identifier on the BAS-IP panel.
-        POST /access/identifier
-        Supports multiple identifier_type variants (input_code, access_code, code)
-        to work seamlessly across different BAS-IP firmware versions.
+        Supports BAS-IP AA-14FB Swagger 1.0-1.7 OpenAPI schemas (/access/identifiers/item)
+        as well as legacy endpoints with automatic fallbacks.
         """
-        lock = lock_number if lock_number is not None else self.config.lock_number
-        type_candidates = ["input_code", "access_code", "code"]
-        last_resp = None
+        lock_num = lock_number if lock_number is not None else self.config.lock_number
+        lock_str = "second" if lock_num == 2 else "first"
 
-        for id_type in type_candidates:
-            payload: Dict[str, Any] = {
-                "identifier_type": id_type,
+        endpoints = [
+            "/access/identifiers/item",      # Primary AA-14FB Swagger 1.0-1.7 endpoint
+            "/access/identifier",            # Legacy endpoint
+            "/access/identifiers",           # Plural alternative
+        ]
+
+        # Payload factories to match different firmware implementations
+        payload_factories = [
+            # 1. Swagger 1.0-1.7 standard (BaseIdentifier with identifier_owner object)
+            ("Swagger Owner Object (inputCode, first/second)", lambda: {
+                "identifier_owner": {"name": name, "type": "owner"},
+                "identifier_type": "inputCode",
                 "identifier_number": str(code),
+                "lock": lock_str,
+            }),
+            # 2. Swagger 1.0-1.7 guest type
+            ("Swagger Guest Object (inputCode, first/second)", lambda: {
+                "identifier_owner": {"name": name, "type": "guest"},
+                "identifier_type": "inputCode",
+                "identifier_number": str(code),
+                "lock": lock_str,
+            }),
+            # 3. Flat name with inputCode enum and lock enum
+            ("Flat name + inputCode + lock enum", lambda: {
                 "name": name,
-                "lock_number": lock,
-            }
+                "identifier_type": "inputCode",
+                "identifier_number": str(code),
+                "lock": lock_str,
+            }),
+            # 4. Flat name with input_code snake_case and lock_number integer
+            ("Flat name + input_code + lock integer", lambda: {
+                "name": name,
+                "identifier_type": "input_code",
+                "identifier_number": str(code),
+                "lock_number": lock_num,
+            }),
+            # 5. Flat name with inputCode and lock_number integer
+            ("Flat name + inputCode + lock integer", lambda: {
+                "name": name,
+                "identifier_type": "inputCode",
+                "identifier_number": str(code),
+                "lock_number": lock_num,
+            }),
+            # 6. Flat name with code type and lock_number integer
+            ("Flat name + code + lock integer", lambda: {
+                "name": name,
+                "identifier_type": "code",
+                "identifier_number": str(code),
+                "lock_number": lock_num,
+            }),
+            # 7. Swagger standard with lock: "all"
+            ("Swagger Owner Object + lock: all", lambda: {
+                "identifier_owner": {"name": name, "type": "owner"},
+                "identifier_type": "inputCode",
+                "identifier_number": str(code),
+                "lock": "all",
+            }),
+        ]
+
+        # Prioritize cached working configuration if already discovered
+        cached = getattr(self, "_working_create_route", None)
+        attempt_history = []
+
+        candidates = []
+        if cached and cached[0] in endpoints and cached[1] < len(payload_factories):
+            candidates.append(cached)
+        for ep in endpoints:
+            for idx in range(len(payload_factories)):
+                pair = (ep, idx)
+                if pair not in candidates:
+                    candidates.append(pair)
+
+        for ep, idx in candidates:
+            desc, factory = payload_factories[idx]
+            payload = factory()
             if link_id is not None:
                 payload["link_id"] = link_id
             if apartment_number:
                 payload["apartment_number"] = str(apartment_number)
 
-            resp = self._request("POST", "/access/identifier", json=payload)
-            if resp.status_code in (200, 201):
-                res_data = resp.json() if resp.text else {}
-                uid = None
-                if isinstance(res_data, dict):
-                    uid = res_data.get("id") or res_data.get("item_uid") or res_data.get("uid")
-
-                logger.info(
-                    "Created access code identifier for '%s' (uid=%s, type=%s) on panel %s",
-                    name,
-                    uid,
-                    id_type,
+            try:
+                logger.debug(
+                    "Trying create identifier on %s via %s [%s]: %s",
                     self.config.host,
+                    ep,
+                    desc,
+                    payload,
                 )
-                return Identifier(
-                    identifier_number=str(code),
-                    identifier_type=id_type,
-                    name=name,
-                    item_uid=int(uid) if uid is not None else None,
-                    link_id=link_id,
-                    lock_number=lock,
-                    apartment_number=apartment_number,
-                    raw_data=res_data if isinstance(res_data, dict) else {},
-                )
-            last_resp = resp
-            if resp.status_code not in (400, 422):
-                # Don't retry if it's 401 or 403 or 500
-                break
+                resp = self._request("POST", ep, json=payload)
+                if resp.status_code in (200, 201):
+                    res_data = resp.json() if resp.text else {}
+                    uid = None
+                    if isinstance(res_data, dict):
+                        uid = (
+                            res_data.get("uid")
+                            or res_data.get("identifier_uid")
+                            or res_data.get("identifier_id")
+                            or res_data.get("item_uid")
+                            or res_data.get("id")
+                        )
 
-        err_text = last_resp.text[:200] if last_resp else "Unknown error"
-        status_code = last_resp.status_code if last_resp else 500
-        raise BASIPError(f"Failed to create identifier on {self.config.host}: HTTP {status_code} - {err_text}")
+                    # Cache the winning combination on this client instance
+                    self._working_create_route = (ep, idx)
+
+                    logger.info(
+                        "Created access code identifier for '%s' (uid=%s) on panel %s [%s: %s]",
+                        name,
+                        uid,
+                        self.config.host,
+                        ep,
+                        desc,
+                    )
+                    return Identifier(
+                        identifier_number=str(code),
+                        identifier_type=payload.get("identifier_type", "inputCode"),
+                        name=name,
+                        item_uid=int(uid) if uid is not None and str(uid).isdigit() else None,
+                        link_id=link_id,
+                        lock_number=lock_num,
+                        apartment_number=apartment_number,
+                        raw_data=res_data if isinstance(res_data, dict) else {},
+                    )
+                else:
+                    attempt_history.append(f"{ep} ({desc}): HTTP {resp.status_code} - {resp.text[:60]}")
+                    logger.debug(
+                        "Panel %s rejected %s [%s]: HTTP %s - %s",
+                        self.config.host,
+                        ep,
+                        desc,
+                        resp.status_code,
+                        resp.text[:100],
+                    )
+            except Exception as e:
+                attempt_history.append(f"{ep} ({desc}): {str(e)[:60]}")
+                logger.debug("Panel %s error with %s [%s]: %s", self.config.host, ep, desc, e)
+
+        # All attempts failed
+        summary = "; ".join(attempt_history[:4])
+        raise BASIPError(f"Failed to create identifier on {self.config.host}. Attempts: {summary}")
 
     def update_identifier(
         self,
@@ -295,39 +481,75 @@ class BASIPClient:
     ) -> bool:
         """
         Update an existing identifier on the BAS-IP panel.
-        PATCH /access/identifier/item/{item_uid}
-        If PATCH is not supported by older firmware, falls back to DELETE + POST.
+        PATCH /access/identifiers/item/{item_uid}
+        If PATCH is not supported or rejected, falls back to DELETE + CREATE.
         """
-        payload: Dict[str, Any] = {"identifier_number": str(new_code)}
-        if name:
-            payload["name"] = name
-        if lock_number is not None:
-            payload["lock_number"] = lock_number
+        lock_num = lock_number if lock_number is not None else self.config.lock_number
+        lock_str = "second" if lock_num == 2 else "first"
 
-        resp = self._request("PATCH", f"/access/identifier/item/{item_uid}", json=payload)
-        if resp.status_code in (200, 204):
-            logger.info("Updated identifier uid=%s with new code on panel %s", item_uid, self.config.host)
-            return True
+        endpoints = [
+            f"/access/identifiers/item/{item_uid}",
+            f"/access/identifier/item/{item_uid}",
+        ]
 
-        if resp.status_code == 405:
-            # Fallback to DELETE + POST
-            logger.warning(
-                "PATCH not allowed (HTTP 405) on panel %s. Falling back to DELETE + POST.",
-                self.config.host,
-            )
-            self.delete_identifier(item_uid)
-            self.create_identifier(new_code, name or "", lock_number)
-            return True
+        patch_payloads = [
+            # Swagger schema UpdatedIdentifier
+            {
+                "base": {
+                    "identifier_owner": {"name": name or "", "type": "owner"},
+                    "identifier_type": "inputCode",
+                    "identifier_number": str(new_code),
+                    "lock": lock_str,
+                }
+            },
+            # Flat payload
+            {
+                "identifier_number": str(new_code),
+                "name": name or "",
+                "lock": lock_str,
+            },
+            {
+                "identifier_number": str(new_code),
+                "identifier_type": "input_code",
+                "lock_number": lock_num,
+            },
+        ]
 
-        raise BASIPError(f"Failed to update identifier uid={item_uid}: HTTP {resp.status_code} - {resp.text}")
+        for ep in endpoints:
+            for p in patch_payloads:
+                try:
+                    resp = self._request("PATCH", ep, json=p)
+                    if resp.status_code in (200, 204):
+                        logger.info("Updated identifier uid=%s via PATCH %s on panel %s", item_uid, ep, self.config.host)
+                        return True
+                except Exception:
+                    continue
+
+        # If PATCH is not accepted, fallback to atomic DELETE + CREATE
+        logger.info("PATCH not accepted on panel %s for uid=%s. Using fallback: DELETE + CREATE", self.config.host, item_uid)
+        self.delete_identifier(item_uid)
+        self.create_identifier(new_code, name or "", lock_number)
+        return True
 
     def delete_identifier(self, item_uid: int) -> bool:
-        """Delete an identifier by UID: DELETE /access/identifier/item/{item_uid}."""
-        resp = self._request("DELETE", f"/access/identifier/item/{item_uid}")
-        if resp.status_code in (200, 204):
-            logger.info("Deleted identifier uid=%s from panel %s", item_uid, self.config.host)
-            return True
-        raise BASIPError(f"Failed to delete identifier uid={item_uid}: HTTP {resp.status_code} - {resp.text}")
+        """Delete an identifier by UID: DELETE /access/identifiers/item/{item_uid}."""
+        endpoints = [
+            f"/access/identifiers/item/{item_uid}",
+            f"/access/identifier/item/{item_uid}",
+            f"/access/identifier/{item_uid}",
+        ]
+        for ep in endpoints:
+            try:
+                resp = self._request("DELETE", ep)
+                if resp.status_code in (200, 204):
+                    logger.info("Deleted identifier uid=%s via %s on panel %s", item_uid, ep, self.config.host)
+                    return True
+            except Exception as e:
+                logger.debug("Panel %s DELETE %s failed: %s", self.config.host, ep, e)
+                continue
+
+        logger.warning("Failed to delete identifier uid=%s on panel %s", item_uid, self.config.host)
+        return False
 
     def set_user_access_code(
         self,
