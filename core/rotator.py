@@ -134,10 +134,16 @@ class PINRotator:
         now = datetime.now()
 
         for user in users:
-            # Check target filter if provided
-            if target_user_ids and user.user_id not in target_user_ids:
-                report.skipped_count += 1
-                continue
+            # Check target filter if provided (matches ID, row number, or user name)
+            if target_user_ids:
+                matches_target = (
+                    user.user_id in target_user_ids
+                    or str(user.row_index) in target_user_ids
+                    or any(t.lower() in user.name.lower() for t in target_user_ids)
+                )
+                if not matches_target:
+                    report.skipped_count += 1
+                    continue
 
             # Check if user is eligible for rotation
             if not force and not user.is_due_for_rotation(now):
