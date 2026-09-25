@@ -80,6 +80,7 @@ class RotationReport:
     rotated_count: int = 0
     skipped_count: int = 0
     failed_count: int = 0
+    backend_error: bool = False
     results: List[UserRotationResult] = field(default_factory=list)
 
 
@@ -123,6 +124,7 @@ class PINRotator:
         except Exception as e:
             logger.error("Failed to read users from backend: %s", e)
             report.finished_at = datetime.now()
+            report.backend_error = True
             return report
 
         report.total_users_checked = len(users)

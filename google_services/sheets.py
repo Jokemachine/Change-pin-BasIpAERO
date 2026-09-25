@@ -9,6 +9,7 @@ import csv
 import logging
 import os
 import re
+import time
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
 import requests
@@ -102,16 +103,26 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
     Works in any country, with any standard Google account.
     """
 
-    def __init__(self, web_app_url: str, api_key: str = "", timeout: int = 15, worksheet_name: str = "Временные коды"):
+    def __init__(
+        self,
+        web_app_url: str,
+        api_key: str = "",
+        timeout: int = 45,
+        worksheet_name: str = "Временные коды",
+        max_retries: int = 3,
+        retry_delay: int = 30,
+    ):
         self.web_app_url = web_app_url.strip()
         self.api_key = api_key.strip()
         self.timeout = timeout
         self.worksheet_name = worksheet_name.strip() if worksheet_name else "Временные коды"
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
         if not self.web_app_url:
             raise ValueError("Google Apps Script web_app_url cannot be empty")
 
     def get_users(self) -> List[AccessCodeUser]:
-        """Fetch users from Google Apps Script Web App."""
+        """Fetch users from Google Apps Script Web App with automatic retries on timeout."""
         params = {"action": "get_users"}
         if self.api_key:
             params["api_key"] = self.api_key
@@ -119,22 +130,59 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
             params["sheet_name"] = self.worksheet_name
 
         logger.debug("Requesting users from Google Apps Script: %s (sheet=%s)", self.web_app_url, self.worksheet_name)
-        try:
-            resp = requests.get(self.web_app_url, params=params, timeout=self.timeout, allow_redirects=True)
-        except requests.exceptions.ConnectionError as e:
-            err_str = str(e)
-            if "getaddrinfo failed" in err_str or "NameResolutionError" in err_str:
-                raise RuntimeError(
-                    "Ошибка подключения к Google (DNS [Errno 11002]): компьютер не может связаться с 'script.google.com'.\n"
-                    "Возможные причины:\n"
-                    "1. Компьютер подключен к локальной сети домофонов (172.39.x.x), где нет выхода в интернет.\n"
-                    "2. Отсутствует подключение к интернету или сбой DNS-сервера.\n"
-                    "3. Попробуйте выполнить в командной строке: ipconfig /flushdns"
-                ) from None
-            raise
+        resp = None
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"Google Apps Script returned status {resp.status_code}: {resp.text}")
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                resp = requests.get(self.web_app_url, params=params, timeout=self.timeout, allow_redirects=True)
+                if resp.status_code == 200:
+                    break
+                logger.warning(
+                    "Google Apps Script вернул HTTP %d (попытка %d из %d). Ожидание %d сек...",
+                    resp.status_code, attempt, self.max_retries, self.retry_delay,
+                )
+                time.sleep(self.retry_delay)
+            except requests.exceptions.ConnectionError as e:
+                err_str = str(e)
+                if "getaddrinfo failed" in err_str or "NameResolutionError" in err_str:
+                    raise RuntimeError(
+                        "Ошибка подключения к Google (DNS [Errno 11002]): компьютер не может связаться с 'script.google.com'.\n"
+                        "Возможные причины:\n"
+                        "1. Компьютер подключен к локальной сети домофонов (172.39.x.x), где нет выхода в интернет.\n"
+                        "2. Отсутствует подключение к интернету или сбой DNS-сервера.\n"
+                        "3. Попробуйте выполнить в командной строке: ipconfig /flushdns"
+                    ) from None
+                if attempt < self.max_retries:
+                    logger.warning(
+                        "Google Apps Script ошибка подключения (%s). Повторная попытка через %d сек (попытка %d из %d)...",
+                        e, self.retry_delay, attempt, self.max_retries,
+                    )
+                    time.sleep(self.retry_delay)
+                    continue
+                raise
+            except requests.exceptions.Timeout as e:
+                if attempt < self.max_retries:
+                    logger.warning(
+                        "Google Apps Script не ответил за %d сек (Read timed out). Повторная попытка через %d секунд (попытка %d из %d)...",
+                        self.timeout, self.retry_delay, attempt, self.max_retries,
+                    )
+                    time.sleep(self.retry_delay)
+                    continue
+                raise
+            except requests.exceptions.RequestException as e:
+                if attempt < self.max_retries:
+                    logger.warning(
+                        "Ошибка запроса к Google Apps Script (%s). Повторная попытка через %d сек (попытка %d из %d)...",
+                        e, self.retry_delay, attempt, self.max_retries,
+                    )
+                    time.sleep(self.retry_delay)
+                    continue
+                raise
+
+        if resp is None or resp.status_code != 200:
+            status_code = resp.status_code if resp is not None else 500
+            err_text = resp.text if resp is not None else "No response"
+            raise RuntimeError(f"Google Apps Script returned status {status_code}: {err_text}")
 
         data = resp.json()
         if not data.get("success", False) and "users" not in data:
@@ -221,7 +269,7 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
         rotation_time: Optional[datetime] = None,
         status: str = "Успешно обновлен",
     ) -> bool:
-        """Update user's access code, date, and status in Google Sheet via Apps Script."""
+        """Update user's access code, date, and status in Google Sheet via Apps Script with retries."""
         if rotation_time is None:
             rotation_time = datetime.now()
         date_str = rotation_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -239,30 +287,57 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
         if self.api_key:
             payload["api_key"] = self.api_key
 
-        try:
-            resp = requests.post(self.web_app_url, json=payload, timeout=self.timeout, allow_redirects=True)
-            if resp.status_code != 200:
-                # Fallback to GET parameters if POST had redirect issue
-                resp = requests.get(self.web_app_url, params=payload, timeout=self.timeout, allow_redirects=True)
-        except requests.exceptions.ConnectionError as e:
-            err_str = str(e)
-            if "getaddrinfo failed" in err_str or "NameResolutionError" in err_str:
-                raise RuntimeError(
-                    "Ошибка подключения к Google (DNS [Errno 11002]): нет связи с 'script.google.com'."
-                ) from None
-            raise
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                resp = requests.post(self.web_app_url, json=payload, timeout=self.timeout, allow_redirects=True)
+                if resp.status_code != 200:
+                    # Fallback to GET parameters if POST had redirect issue
+                    resp = requests.get(self.web_app_url, params=payload, timeout=self.timeout, allow_redirects=True)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("success", False):
+                        user.current_code = new_code
+                        user.last_rotated = rotation_time
+                        user.status = status
+                        logger.info("Updated Google Sheet for '%s': code=%s", user.name, new_code)
+                        return True
+                    raise RuntimeError(f"Apps Script update failed: {data.get('error')}")
+                logger.warning(
+                    "Google Apps Script update_code вернул HTTP %d (попытка %d из %d). Ожидание %d сек...",
+                    resp.status_code, attempt, self.max_retries, self.retry_delay,
+                )
+                time.sleep(self.retry_delay)
+            except requests.exceptions.ConnectionError as e:
+                err_str = str(e)
+                if "getaddrinfo failed" in err_str or "NameResolutionError" in err_str:
+                    raise RuntimeError(
+                        "Ошибка подключения к Google (DNS [Errno 11002]): нет связи с 'script.google.com'."
+                    ) from None
+                if attempt < self.max_retries:
+                    logger.warning("Ошибка соединения при записи в Google Apps Script (%s). Повтор через %d сек...", e, self.retry_delay)
+                    time.sleep(self.retry_delay)
+                    continue
+                raise
+            except requests.exceptions.Timeout as e:
+                if attempt < self.max_retries:
+                    logger.warning(
+                        "Google Apps Script не ответил за %d сек при сохранении кода. Повторная попытка через %d сек (попытка %d из %d)...",
+                        self.timeout, self.retry_delay, attempt, self.max_retries,
+                    )
+                    time.sleep(self.retry_delay)
+                    continue
+                raise
+            except requests.exceptions.RequestException as e:
+                if attempt < self.max_retries:
+                    logger.warning(
+                        "Ошибка сети при сохранении в Google Apps Script (%s). Повторная попытка через %d сек...",
+                        e, self.retry_delay,
+                    )
+                    time.sleep(self.retry_delay)
+                    continue
+                raise
 
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("success", False):
-                user.current_code = new_code
-                user.last_rotated = rotation_time
-                user.status = status
-                logger.info("Updated Google Sheet for '%s': code=%s", user.name, new_code)
-                return True
-            raise RuntimeError(f"Apps Script update failed: {data.get('error')}")
-
-        raise RuntimeError(f"HTTP error {resp.status_code} from Apps Script: {resp.text}")
+        raise RuntimeError("Failed to update user code in Google Apps Script after retries")
 
 
 class AppSheetBackend(BaseSheetsBackend):
