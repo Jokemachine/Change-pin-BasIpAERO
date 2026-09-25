@@ -5,5 +5,6 @@ __pycache__/
 .env
 .github_token
 *.token
+config.yaml
 service_account.json
 *.log

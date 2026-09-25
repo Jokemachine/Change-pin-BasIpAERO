@@ -81,15 +81,22 @@ class MockBASIPRequestHandler(BaseHTTPRequestHandler):
             if not self._check_auth():
                 return self._send_json(401, {"error": "Unauthorized"})
 
+            page_val = int(query.get("current_page", query.get("page_number", query.get("page", [1])))[0])
+            limit_val = int(query.get("items_limit", query.get("limit", [50]))[0])
             items = list(self.identifiers.values())
+            start_idx = (page_val - 1) * limit_val
+            end_idx = start_idx + limit_val
+            page_items = items[start_idx:end_idx]
+            total_pages = max(1, (len(items) + limit_val - 1) // limit_val) if limit_val > 0 else 1
+
             return self._send_json(200, {
-                "list_items": items,
+                "list_items": page_items,
                 "list_option": {
                     "pagination": {
                         "total_items": len(items),
-                        "items_limit": 100,
-                        "total_pages": 1,
-                        "current_page": 1,
+                        "items_limit": limit_val,
+                        "total_pages": total_pages,
+                        "current_page": page_val,
                     }
                 }
             })
@@ -230,6 +237,20 @@ class MockBASIPRequestHandler(BaseHTTPRequestHandler):
 
         if not self._check_auth():
             return self._send_json(401, {"error": "Unauthorized"})
+
+        # Mass delete by UID list: /access/identifier/items or /access/identifiers/items
+        if any(path.endswith(ep) for ep in ("/access/identifier/items", "/access/identifiers/items")):
+            content_length = int(self.headers.get("Content-Length", 0))
+            post_data = self.rfile.read(content_length)
+            body = json.loads(post_data.decode("utf-8")) if post_data else {}
+            uid_items = body.get("uid_items") or body.get("list_items") or []
+            if isinstance(body, list):
+                uid_items = body
+            for uid in uid_items:
+                uid_int = int(uid) if str(uid).isdigit() else uid
+                if uid_int in MockBASIPRequestHandler.identifiers:
+                    del MockBASIPRequestHandler.identifiers[uid_int]
+            return self._send_json(200, {"message": "Deleted"})
 
         if "/access/identifiers/item/" in path or "/access/identifier/item/" in path or "/access/identifier/" in path:
             try:

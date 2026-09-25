@@ -267,43 +267,92 @@ def cmd_inspect_panel(args, config: AppConfig):
         print(f"Расположение: {client.config.location_str}")
         print(f"=======================================================\n")
 
-        print("[1] Авторизация и информация об устройстве (/api/info):")
+        print("[1] Авторизация и информация об устройстве:")
         try:
             client.login()
-            resp = client._request("GET", "/api/info")
-            print(f" -> Статус: HTTP {resp.status_code}")
-            if resp.status_code == 200:
-                print(f" -> Ответ: {resp.text}")
+            found_info = False
+            for ep in ("/api/info", "/info", "/status"):
+                try:
+                    resp = client._request("GET", ep)
+                    if resp.status_code == 200:
+                        print(f" -> {ep}: HTTP 200 | {resp.text.strip()}")
+                        found_info = True
+                        break
+                except Exception:
+                    pass
+            if not found_info:
+                print(" -> Авторизация успешна (токен получен)")
         except Exception as e:
-            print(f" -> Ошибка: {e}")
+            print(f" -> Ошибка авторизации: {e}")
 
-        print("\n[2] Список ВСЕХ идентификаторов в памяти панели:")
+        print("\n[2] Проверка поддерживаемых эндпоинтов и пагинации:")
+        test_schemes = [
+            ("/access/identifier/items", {"current_page": 1, "items_limit": 50}, {"current_page": 2, "items_limit": 50}),
+            ("/access/identifiers/items/list", {"page_number": 1, "limit": 50}, {"page_number": 2, "limit": 50}),
+            ("/access/identifier/items", {"page_number": 1, "limit": 50}, {"page_number": 2, "limit": 50}),
+            ("/access/identifiers", {"page": 1, "limit": 50}, {"page": 2, "limit": 50}),
+        ]
+        for path, p1, p2 in test_schemes:
+            try:
+                r1 = client._request("GET", path, params=p1)
+                if r1.status_code == 200 and r1.text:
+                    d1 = r1.json() if r1.text else {}
+                    items1 = d1.get("list_items") or d1.get("items") or (d1 if isinstance(d1, list) else [])
+                    pag = d1.get("list_option", {}).get("pagination", {}) if isinstance(d1, dict) else {}
+                    tot = pag.get("total_items", len(items1))
+                    tot_p = pag.get("total_pages", 1)
+                    first_uid = items1[0].get("identifier_uid") if items1 and isinstance(items1[0], dict) else None
+
+                    # Test page 2
+                    uid2 = None
+                    r2 = client._request("GET", path, params=p2)
+                    if r2.status_code == 200 and r2.text:
+                        d2 = r2.json() if r2.text else {}
+                        items2 = d2.get("list_items") or d2.get("items") or (d2 if isinstance(d2, list) else [])
+                        uid2 = items2[0].get("identifier_uid") if items2 and isinstance(items2[0], dict) else None
+
+                    paginates = (uid2 is not None and uid2 != first_uid) or (tot_p <= 1)
+                    p_status = f"РАБОТАЕТ (UID1={first_uid} != UID2={uid2})" if paginates else f"НЕ РАБОТАЕТ (дубликат UID={first_uid})"
+                    print(f" -> {path} [{list(p1.keys())}]: HTTP 200 | Всего записей={tot}, Страниц={tot_p} | Пагинация: {p_status}")
+                else:
+                    print(f" -> {path} [{list(p1.keys())}]: HTTP {r1.status_code}")
+            except Exception as ex:
+                print(f" -> {path} [{list(p1.keys())}]: Ошибка {ex}")
+
+        print("\n[3] Загрузка ВСЕХ идентификаторов из памяти панели...")
         try:
-            identifiers = client.get_identifiers(limit=50)
-            print(f" -> Всего найдено записей: {len(identifiers)}")
-            for idx, ident in enumerate(identifiers, 1):
-                print(f"    #{idx}: UID={ident.item_uid} | Имя='{ident.name}' | Тип={ident.identifier_type} | Код='{ident.identifier_number}'")
-                if ident.raw_data:
-                    import json
-                    print(f"         RAW: {json.dumps(ident.raw_data, ensure_ascii=False)}")
-            if not identifiers:
-                print(" -> Проверка эндпоинтов получения списка:")
-                for ep, params in [
-                    ("/access/identifiers/items/list", {"page_number": 1, "limit": 50}),
-                    ("/access/identifiers/items/list", {}),
-                    ("/access/identifier/items", {"current_page": 1, "items_limit": 50}),
-                    ("/access/identifier/items", {}),
-                ]:
-                    try:
-                        resp = client._request("GET", ep, params=params)
-                        print(f"    {ep}: HTTP {resp.status_code} | {resp.text[:120]}")
-                    except Exception as ex:
-                        print(f"    {ep}: Ошибка {ex}")
+            identifiers = client.get_identifiers(limit=50, fetch_all=True)
+            cards = [i for i in identifiers if not client._is_code_type(i.identifier_type)]
+            codes = [i for i in identifiers if client._is_code_type(i.identifier_type)]
+            print(f" -> Всего уникальных записей загружено: {len(identifiers)}")
+            print(f"    - RFID-карт / брелоков: {len(cards)} шт.")
+            print(f"    - Кодов доступа (PIN / inputCode): {len(codes)} шт.")
+
+            if codes:
+                print("\n[4] Список найденных КОДОВ ДОСТУПА:")
+                for idx, c in enumerate(codes, 1):
+                    print(f"    #{idx}: UID={c.item_uid} | Имя='{c.name}' | Код='{c.identifier_number}' | Замок={c.lock_number} | Тип={c.identifier_type}")
+            else:
+                print("\n[4] В памяти панели пока нет отдельных кодов доступа (inputCode)")
+
+            target_user = args.user or "Тест"
+            print(f"\n[5] Поиск кодов для пользователя '{target_user}':")
+            user_matches = client.find_all_user_code_identifiers(name=target_user)
+            if user_matches:
+                print(f" -> Найдено кодов для '{target_user}': {len(user_matches)} шт.")
+                for idx, m in enumerate(user_matches, 1):
+                    print(f"    #{idx}: UID={m.item_uid} | Имя='{m.name}' | Код='{m.identifier_number}'")
+                if getattr(args, "cleanup", False):
+                    print(f"\n -> Запуск удаления {len(user_matches)} кодов для '{target_user}'...")
+                    del_cnt = client.cleanup_user_codes(name=target_user)
+                    print(f" -> УСПЕХ: Удалено {del_cnt} кодов для '{target_user}'!")
+            else:
+                print(f" -> Для пользователя '{target_user}' активных кодов доступа не найдено.")
         except Exception as e:
-            print(f" -> Ошибка получения списка: {e}")
+            print(f" -> Ошибка при загрузке списка: {e}")
 
         if args.test_pin:
-            print("\n[3] Тестовое создание и удаление PIN-кода '998877'...")
+            print("\n[6] Тестовое создание и удаление PIN-кода '998877'...")
             try:
                 ident = client.create_identifier(code="998877", name="Тестовый Доступ")
                 print(f" -> УСПЕХ: Код создан! UID={ident.item_uid}, Тип={ident.identifier_type}")
@@ -311,7 +360,7 @@ def cmd_inspect_panel(args, config: AppConfig):
                     del_ok = client.delete_identifier(ident.item_uid)
                     print(f" -> Тестовый код успешно удален из памяти панели: {del_ok}")
             except Exception as e:
-                print(f" -> Ошибка создания: {e}")
+                print(f" -> Ошибка создания/удаления: {e}")
 
         print("\nДиагностика завершена.\n")
     finally:
@@ -452,6 +501,8 @@ def main():
     # Command: inspect-panel
     inspect_parser = subparsers.add_parser("inspect-panel", help="Подробная диагностика API выбранной панели")
     inspect_parser.add_argument("--panel", default="gate_1", help="ID панели для диагностики (по умолчанию gate_1)")
+    inspect_parser.add_argument("--user", help="Имя пользователя для детального поиска (например, 'Тест')")
+    inspect_parser.add_argument("--cleanup", action="store_true", help="Удалить найденные старые коды пользователя")
     inspect_parser.add_argument("--test-pin", action="store_true", help="Попробовать создать и удалить тестовый PIN 998877")
     inspect_parser.add_argument("--mock-panel", action="store_true", help="Использовать mock BAS-IP")
 

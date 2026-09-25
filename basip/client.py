@@ -188,143 +188,208 @@ class BASIPClient:
                 msg = err_msg
             return (False, msg) if return_detail else False
 
-    def get_identifiers(self, page: int = 1, limit: int = 50) -> List[Identifier]:
-        """Fetch list of identifiers stored on the panel."""
-        safe_limit = limit if limit in (10, 20, 30, 50) else 50
+    def _fetch_page_raw(self, path: str, params: Dict[str, Any]):
+        """Fetch raw JSON items and pagination info from an endpoint."""
+        resp = self._request("GET", path, params=params)
+        if resp.status_code != 200 or not resp.text:
+            return resp.status_code, [], {}
+        try:
+            data = resp.json()
+        except Exception:
+            return resp.status_code, [], {}
 
-        endpoint_configs = [
-            # 1. Swagger 1.0 - 1.7 standard (query params: page_number, limit)
-            ("/access/identifiers/items/list", {"page_number": page, "limit": safe_limit}),
-            # 2. Swagger with paginationLimit parameter names
-            ("/access/identifiers/items/list", {"paginationPageNumber": page, "paginationLimit": safe_limit}),
-            # 3. Swagger without query params (uses panel defaults)
-            ("/access/identifiers/items/list", {}),
-            # 4. Legacy endpoint with items_limit
-            ("/access/identifier/items", {"current_page": page, "items_limit": safe_limit}),
-            # 5. Legacy endpoint with page & limit
-            ("/access/identifier/items", {"page": page, "limit": safe_limit}),
-            # 6. Legacy without query params
-            ("/access/identifier/items", {}),
-            # 7. REST plural
-            ("/access/identifiers", {"page": page, "limit": safe_limit}),
-            ("/access/identifiers", {}),
-        ]
-
-        best_resp = None
-        best_items = []
-
-        for path, params in endpoint_configs:
-            try:
-                resp = self._request("GET", path, params=params)
-                if resp.status_code == 200 and resp.text:
-                    try:
-                        data = resp.json()
-                    except Exception:
-                        continue
-
-                    raw_list = []
-                    if isinstance(data, dict):
-                        raw_list = (
-                            data.get("list_items")
-                            or data.get("items")
-                            or data.get("data")
-                            or data.get("identifiers")
-                            or []
-                        )
-                    elif isinstance(data, list):
-                        raw_list = data
-
-                    if isinstance(raw_list, list) and len(raw_list) > 0:
-                        # Found non-empty list of items!
-                        best_resp = resp
-                        best_items = raw_list
-                        break
-                    elif best_resp is None:
-                        best_resp = resp
-                        best_items = raw_list if isinstance(raw_list, list) else []
-            except Exception as e:
-                logger.debug("Panel %s: GET %s failed: %s", self.config.host, path, e)
-                continue
-
-        if best_resp is None or best_resp.status_code != 200:
-            status = best_resp.status_code if best_resp else 500
-            err_text = best_resp.text[:120] if best_resp else "No response"
-            logger.warning("Could not fetch identifiers from panel %s: HTTP %s - %s", self.config.host, status, err_text)
-            return []
-
-        identifiers: List[Identifier] = []
-        for item in best_items:
-            if not isinstance(item, dict):
-                continue
-            item_uid = (
-                item.get("identifier_uid")
-                or item.get("identifier_id")
-                or item.get("item_uid")
-                or item.get("uid")
-                or item.get("id")
+        raw_list = []
+        pagination = {}
+        if isinstance(data, dict):
+            raw_list = (
+                data.get("list_items")
+                or data.get("items")
+                or data.get("data")
+                or data.get("identifiers")
+                or []
             )
-            link_id = item.get("link_id")
-            num = str(
-                item.get("identifier_number")
-                or item.get("code")
-                or item.get("number")
-                or item.get("pin")
-                or item.get("input_code")
+            pagination = data.get("list_option", {}).get("pagination", {})
+        elif isinstance(data, list):
+            raw_list = data
+
+        return 200, raw_list if isinstance(raw_list, list) else [], pagination
+
+    def _parse_identifier_item(self, item: Dict[str, Any]) -> Identifier:
+        item_uid = (
+            item.get("identifier_uid")
+            or item.get("identifier_id")
+            or item.get("item_uid")
+            or item.get("uid")
+            or item.get("id")
+        )
+        link_id = item.get("link_id")
+        num = str(
+            item.get("identifier_number")
+            or item.get("code")
+            or item.get("number")
+            or item.get("pin")
+            or item.get("input_code")
+            or ""
+        ).strip()
+        id_type = item.get("identifier_type", item.get("type", "inputCode"))
+
+        # Extract name/owner comprehensively
+        owner_field = item.get("identifier_owner")
+        name = ""
+        if isinstance(owner_field, dict):
+            name = owner_field.get("name", "")
+        elif isinstance(owner_field, str):
+            name = owner_field
+
+        if not name:
+            name = str(
+                item.get("name")
+                or item.get("owner")
+                or item.get("owner_name")
+                or item.get("user")
+                or item.get("user_name")
+                or item.get("description")
                 or ""
             ).strip()
-            id_type = item.get("identifier_type", item.get("type", "inputCode"))
 
-            # Extract name/owner comprehensively
-            owner_field = item.get("identifier_owner")
-            name = ""
-            if isinstance(owner_field, dict):
-                name = owner_field.get("name", "")
-            elif isinstance(owner_field, str):
-                name = owner_field
+        lock_val = item.get("lock", item.get("lock_number", self.config.lock_number))
+        apt_num = item.get("apartment_number", item.get("apartment", None))
+        if isinstance(apt_num, dict):
+            apt_num = apt_num.get("apartment_name") or apt_num.get("number")
 
-            if not name:
-                name = str(
-                    item.get("name")
-                    or item.get("owner")
-                    or item.get("owner_name")
-                    or item.get("user")
-                    or item.get("user_name")
-                    or item.get("description")
-                    or ""
-                ).strip()
+        return Identifier(
+            identifier_number=num,
+            identifier_type=str(id_type),
+            name=name,
+            item_uid=int(item_uid) if item_uid is not None and str(item_uid).isdigit() else None,
+            link_id=int(link_id) if link_id is not None and str(link_id).isdigit() else None,
+            lock_number=lock_val if isinstance(lock_val, int) else self.config.lock_number,
+            apartment_number=str(apt_num) if apt_num is not None else None,
+            raw_data=item,
+        )
 
-            lock_val = item.get("lock", item.get("lock_number", self.config.lock_number))
-            apt_num = item.get("apartment_number", item.get("apartment", None))
-            if isinstance(apt_num, dict):
-                apt_num = apt_num.get("apartment_name") or apt_num.get("number")
+    def get_identifiers(
+        self,
+        page: int = 1,
+        limit: int = 50,
+        fetch_all: bool = True,
+        max_pages: int = 200,
+    ) -> List[Identifier]:
+        """Fetch list of identifiers stored on the panel with robust multi-page pagination."""
+        safe_limit = limit if limit in (10, 20, 30, 50) else 50
 
-            identifiers.append(
-                Identifier(
-                    identifier_number=num,
-                    identifier_type=str(id_type),
-                    name=name,
-                    item_uid=item_uid,
-                    link_id=int(link_id) if link_id is not None and str(link_id).isdigit() else None,
-                    lock_number=lock_val if isinstance(lock_val, int) else self.config.lock_number,
-                    apartment_number=str(apt_num) if apt_num is not None else None,
-                    raw_data=item,
-                )
-            )
+        # Candidate pagination schemes across BAS-IP Camdroid / Android panels
+        candidate_schemes = [
+            # 1. Official Camdroid / Android panels standard
+            ("/access/identifier/items", lambda p, lim: {"current_page": p, "items_limit": lim}),
+            # 2. Swagger 1.0 - 1.7 standard
+            ("/access/identifiers/items/list", lambda p, lim: {"page_number": p, "limit": lim}),
+            # 3. Hybrid / variations
+            ("/access/identifier/items", lambda p, lim: {"page_number": p, "limit": lim}),
+            ("/access/identifiers/items/list", lambda p, lim: {"current_page": p, "items_limit": lim}),
+            ("/access/identifier/items", lambda p, lim: {"page": p, "limit": lim}),
+            ("/access/identifiers", lambda p, lim: {"page": p, "limit": lim}),
+            ("/access/identifiers/items/list", lambda p, lim: {}),
+            ("/access/identifier/items", lambda p, lim: {}),
+        ]
 
-        # Check pagination for additional pages
-        try:
-            resp_data = best_resp.json()
-            if isinstance(resp_data, dict) and page == 1:
-                pagination = resp_data.get("list_option", {}).get("pagination", {})
-                total_pages = pagination.get("total_pages", 1)
-                if isinstance(total_pages, int) and total_pages > 1:
-                    for next_p in range(2, min(total_pages + 1, 10)):
-                        more_ids = self.get_identifiers(page=next_p, limit=safe_limit)
-                        identifiers.extend(more_ids)
-        except Exception:
-            pass
+        cached_route = getattr(self, "_working_list_route", None)
+        schemes_to_try = [cached_route] if cached_route else candidate_schemes
 
-        return identifiers
+        working_path = None
+        working_param_fn = None
+        page1_items = []
+        pagination_info = {}
+
+        for item in schemes_to_try:
+            if not item:
+                continue
+            path, param_fn = item
+            try:
+                status, raw_items, pag = self._fetch_page_raw(path, param_fn(1, safe_limit))
+                if status == 200:
+                    total_pages = pag.get("total_pages", 1) if isinstance(pag, dict) else 1
+
+                    # If total_pages > 1 and we have items, verify that page 2 does not return the exact same items
+                    if total_pages > 1 and raw_items:
+                        st2, raw_p2, _ = self._fetch_page_raw(path, param_fn(2, safe_limit))
+                        if st2 == 200 and raw_p2:
+                            uid1 = raw_items[0].get("identifier_uid") or raw_items[0].get("uid") or raw_items[0].get("link_id")
+                            uid2 = raw_p2[0].get("identifier_uid") or raw_p2[0].get("uid") or raw_p2[0].get("link_id")
+                            if uid1 == uid2:
+                                # This scheme ignored pagination parameter (returned page 1 again)! Skip it.
+                                logger.debug(
+                                    "Panel %s: scheme %s ignored page parameter (p1 uid=%s == p2 uid=%s)",
+                                    self.config.host, path, uid1, uid2,
+                                )
+                                continue
+
+                    working_path = path
+                    working_param_fn = param_fn
+                    page1_items = raw_items
+                    pagination_info = pag
+                    self._working_list_route = (path, param_fn)
+                    break
+            except Exception as e:
+                logger.debug("Panel %s: scheme %s failed: %s", self.config.host, path, e)
+                continue
+
+        # If cached route failed to paginate or was invalid, fallback to probing all schemes
+        if working_path is None and cached_route:
+            self._working_list_route = None
+            return self.get_identifiers(page=page, limit=limit, fetch_all=fetch_all, max_pages=max_pages)
+
+        if working_path is None:
+            logger.warning("Could not fetch identifiers from panel %s (no responsive endpoint found)", self.config.host)
+            return []
+
+        # If caller requested a specific single page and fetch_all is False
+        if not fetch_all or page > 1:
+            if page == 1:
+                return [self._parse_identifier_item(i) for i in page1_items]
+            status, raw_p, _ = self._fetch_page_raw(working_path, working_param_fn(page, safe_limit))
+            return [self._parse_identifier_item(i) for i in raw_p]
+
+        # Fetch all pages
+        all_raw_items = list(page1_items)
+        seen_uids = set()
+        for i in page1_items:
+            uid = i.get("identifier_uid") or i.get("identifier_id") or i.get("item_uid") or i.get("uid") or i.get("link_id")
+            if uid is not None:
+                seen_uids.add(uid)
+
+        total_pages = pagination_info.get("total_pages", 1) if isinstance(pagination_info, dict) else 1
+        total_items = pagination_info.get("total_items", len(page1_items)) if isinstance(pagination_info, dict) else len(page1_items)
+
+        if total_pages > 1:
+            for p in range(2, min(total_pages + 1, max_pages + 1)):
+                if len(seen_uids) >= total_items:
+                    break
+                try:
+                    status, p_items, _ = self._fetch_page_raw(working_path, working_param_fn(p, safe_limit))
+                    if status != 200 or not p_items:
+                        break
+
+                    new_items_found = 0
+                    for item in p_items:
+                        uid = item.get("identifier_uid") or item.get("identifier_id") or item.get("item_uid") or item.get("uid") or item.get("link_id")
+                        if uid is not None:
+                            if uid not in seen_uids:
+                                seen_uids.add(uid)
+                                all_raw_items.append(item)
+                                new_items_found += 1
+                        else:
+                            all_raw_items.append(item)
+                            new_items_found += 1
+
+                    if new_items_found == 0:
+                        # Page returned only previously seen items (duplicate page) - stop pagination
+                        break
+                except Exception as e:
+                    logger.debug("Panel %s: error fetching page %d: %s", self.config.host, p, e)
+                    break
+
+        return [self._parse_identifier_item(i) for i in all_raw_items]
 
     @staticmethod
     def _is_code_type(t: str) -> bool:
@@ -604,44 +669,70 @@ class BASIPClient:
     def delete_identifier(self, item_uid: Any) -> bool:
         """Delete an identifier by UID: DELETE /access/identifiers/item/{item_uid}."""
         uid_str = str(item_uid)
-        endpoints = [
-            f"/access/identifiers/item/{uid_str}",
+        uid_val = int(uid_str) if uid_str.isdigit() else uid_str
+
+        # 1. Standard single item DELETE endpoints
+        single_endpoints = [
             f"/access/identifier/item/{uid_str}",
+            f"/access/identifiers/item/{uid_str}",
             f"/access/identifier/{uid_str}",
+            f"/access/identifiers/{uid_str}",
         ]
-        for ep in endpoints:
+        for ep in single_endpoints:
             try:
                 resp = self._request("DELETE", ep)
                 if resp.status_code in (200, 204):
-                    logger.info("Deleted identifier uid=%s via %s on panel %s", uid_str, ep, self.config.host)
+                    logger.info("Deleted identifier uid=%s via DELETE %s on panel %s", uid_str, ep, self.config.host)
                     return True
             except Exception as e:
                 logger.debug("Panel %s DELETE %s failed: %s", self.config.host, ep, e)
                 continue
 
-        # Also try POST /access/identifiers/items/delete (Swagger batch delete)
-        uid_val = int(uid_str) if uid_str.isdigit() else uid_str
-        for batch_payload in [
-            {"count": 1, "uid_items": [uid_val]},
-            {"uid_items": [uid_val]},
-            {"list_items": [uid_val]},
-            [uid_val],
-        ]:
-            try:
-                resp = self._request(
-                    "POST",
-                    "/access/identifiers/items/delete",
-                    json=batch_payload,
-                )
-                if resp.status_code in (200, 204):
-                    logger.info(
-                        "Deleted identifier uid=%s via POST /access/identifiers/items/delete on panel %s",
-                        uid_str,
-                        self.config.host,
+        # 2. Official Camdroid / Android mass delete endpoint: DELETE /access/identifier/items
+        for del_ep in ("/access/identifier/items", "/access/identifiers/items"):
+            for batch_payload in [
+                {"uid_items": [uid_val]},
+                {"count": 1, "uid_items": [uid_val]},
+                {"list_items": [uid_val]},
+                [uid_val],
+            ]:
+                try:
+                    resp = self._request("DELETE", del_ep, json=batch_payload)
+                    if resp.status_code in (200, 204):
+                        logger.info(
+                            "Deleted identifier uid=%s via DELETE %s on panel %s",
+                            uid_str,
+                            del_ep,
+                            self.config.host,
+                        )
+                        return True
+                except Exception:
+                    pass
+
+        # 3. Swagger batch delete via POST: POST /access/identifiers/items/delete
+        for post_ep in ("/access/identifiers/items/delete", "/access/identifier/items/delete"):
+            for batch_payload in [
+                {"count": 1, "uid_items": [uid_val]},
+                {"uid_items": [uid_val]},
+                {"list_items": [uid_val]},
+                [uid_val],
+            ]:
+                try:
+                    resp = self._request(
+                        "POST",
+                        post_ep,
+                        json=batch_payload,
                     )
-                    return True
-            except Exception:
-                pass
+                    if resp.status_code in (200, 204):
+                        logger.info(
+                            "Deleted identifier uid=%s via POST %s on panel %s",
+                            uid_str,
+                            post_ep,
+                            self.config.host,
+                        )
+                        return True
+                except Exception:
+                    pass
 
         logger.warning("Failed to delete identifier uid=%s on panel %s", uid_str, self.config.host)
         return False
@@ -696,7 +787,13 @@ class BASIPClient:
                         old_ident.name,
                         self.config.host,
                     )
-                    self.delete_identifier(old_ident.item_uid)
+                    del_ok = self.delete_identifier(old_ident.item_uid)
+                    if del_ok:
+                        logger.info("Successfully deleted old code uid=%s on panel %s", old_ident.item_uid, self.config.host)
+                    else:
+                        logger.warning("Could not delete old code uid=%s on panel %s", old_ident.item_uid, self.config.host)
+        else:
+            logger.info("No existing code identifiers found for user '%s' on panel %s", name, self.config.host)
 
         # 2. Create fresh new access code
         logger.info("Creating new access code '%s' for user '%s' on panel %s...", new_code, name, self.config.host)

@@ -122,6 +122,22 @@ def test_set_user_access_code_purges_multiple_duplicates(client):
     assert remaining[0].identifier_number == "888999"
 
 
+def test_multi_page_pagination(client):
+    """Test that get_identifiers correctly fetches all items across multiple pages."""
+    # Create 25 identifiers
+    for i in range(25):
+        client.create_identifier(code=f"1000{i:02d}", name=f"Многостраничный {i}")
+
+    # Fetch with limit=10 (should paginate across 3+ pages)
+    all_fetched = client.get_identifiers(limit=10, fetch_all=True)
+    all_test_items = [item for item in all_fetched if "Многостраничный" in item.name]
+    assert len(all_test_items) == 25
+
+    # Check that cleanup deletes them all
+    for i in range(25):
+        client.cleanup_user_codes(name=f"Многостраничный {i}")
+
+
 def test_generate_38_panels_topology():
     """Verify that facility topology generates exactly 38 panels according to specification."""
     panels = generate_default_38_panels()
