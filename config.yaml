@@ -1,0 +1,57 @@
+# ==============================================================================
+# Конфигурация сервиса автоматической смены кодов доступа BAS-IP AA14FB
+# Структура объекта: 4 дома (в 1-м и 4-м по 3 двойных подъезда,
+#                    во 2-м и 3-м по 6 двойных подъездов) + 2 калитки = всего 38 панелей
+# ==============================================================================
+
+# Файл с индивидуальными настройками для всех 38 панелей (IP-адреса, логины, пароли):
+# Можно использовать "panels.yaml" или "panels.csv" (для Excel):
+panels_file: "panels.yaml"
+
+# Базовая топология вызывных панелей жилого комплекса (если не используется panels_file):
+facility_topology:
+  use_default_38_panels: true  # 38 панелей: 2 калитки + 4 дома
+  base_ip_prefix: "192.168.1." # Базовая подсеть для панелей домофонов
+  start_ip_suffix: 10          # Начальный IP (192.168.1.10 ... 192.168.1.47)
+  default_port: 80
+  default_username: "admin"
+  default_password: "ВашПароль"
+
+# Список конкретных панелей (если задаются прямо в конфиге):
+basip_panels: []
+
+# Интеграция с Google Таблицами через Google Apps Script
+google_sheets:
+  backend_type: "google_apps_script"
+  gas_web_app_url: "https://script.google.com/macros/s/AKfycbwVheDx1OHq5r_7bvAsOsRHpPS3XbvGfcKzTRhMwP43OoLaIef0Lpx-12dV9--WHYEo/exec"
+  gas_api_key: ""
+  worksheet_name: "Временные коды"    # Точное название вкладки в Google Таблице
+  appsheet_app_id: ""
+  appsheet_access_key: ""
+  appsheet_table_name: "Временные коды"
+  credentials_json: "service_account.json"
+  spreadsheet_id_or_title: "BAS-IP Access Codes"
+  csv_fallback_path: "users_access_codes.csv"
+
+# Отправка писем через Google Mail (Gmail SMTP)
+gmail:
+  user: "uk.rascvet@gmail.com"
+  app_password: "brkb apuq gvuk fnrx"
+  from_name: "Домофон BAS-IP AA-14FB"
+  subject: "Смена кода доступа домофона"
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 465
+  use_ssl: true
+  mock_email: false
+
+# Параметры ротации кодов доступа
+rotation:
+  interval_days: 14            # Смена кодов раз в две недели (14 дней)
+  code_length: 6               # Длина цифрового PIN-кода (от 4 до 8 цифр)
+  avoid_trivial_codes: true    # Исключать тривиальные коды (123456, 111111, 654321 и т.д.)
+  dry_run: false               # Режим симуляции (true - только показать, что изменится)
+  schedule_time: "03:00"       # Время суток для автоматической ежедневной проверки (ЧЧ:ММ)
+  check_interval_hours: 12     # Интервал проверки срока кодов (каждые N часов)
+
+use_mock_panel: false
+mock_panel_port: 18080
