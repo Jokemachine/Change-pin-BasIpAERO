@@ -283,6 +283,22 @@ def cmd_inspect_panel(args, config: AppConfig):
             print(f" -> Всего найдено записей: {len(identifiers)}")
             for idx, ident in enumerate(identifiers, 1):
                 print(f"    #{idx}: UID={ident.item_uid} | Имя='{ident.name}' | Тип={ident.identifier_type} | Код='{ident.identifier_number}'")
+                if ident.raw_data:
+                    import json
+                    print(f"         RAW: {json.dumps(ident.raw_data, ensure_ascii=False)}")
+            if not identifiers:
+                print(" -> Проверка эндпоинтов получения списка:")
+                for ep, params in [
+                    ("/access/identifiers/items/list", {"page_number": 1, "limit": 50}),
+                    ("/access/identifiers/items/list", {}),
+                    ("/access/identifier/items", {"current_page": 1, "items_limit": 50}),
+                    ("/access/identifier/items", {}),
+                ]:
+                    try:
+                        resp = client._request("GET", ep, params=params)
+                        print(f"    {ep}: HTTP {resp.status_code} | {resp.text[:120]}")
+                    except Exception as ex:
+                        print(f"    {ep}: Ошибка {ex}")
         except Exception as e:
             print(f" -> Ошибка получения списка: {e}")
 
@@ -309,8 +325,17 @@ def cmd_cleanup_codes(args, config: AppConfig):
     try:
         user_name = args.user
         code = args.code
-        if not user_name and not code:
-            print("Укажите имя пользователя (--user 'Имя') или код (--code '123456')")
+        uid = getattr(args, "uid", None)
+        if not user_name and not code and not uid:
+            print("Укажите имя пользователя (--user 'Имя'), код (--code '123456') или UID (--uid 1)")
+            return
+
+        if uid:
+            print(f"\n--- Принудительное удаление идентификатора UID={uid} на всех панелях ---")
+            for pid, client in manager.clients.items():
+                ok = client.delete_identifier(uid)
+                print(f"[{pid}]: {'Удален' if ok else 'Не найден или ошибка'}")
+            print()
             return
 
         print(f"\n--- Очистка кодов доступа: Пользователь='{user_name or 'Все'}', Код='{code or 'Все'}' ---")
@@ -434,6 +459,7 @@ def main():
     cleanup_parser = subparsers.add_parser("cleanup-codes", help="Удалить устаревшие/дублирующиеся коды доступа с панелей")
     cleanup_parser.add_argument("--user", help="Имя пользователя для очистки кодов (например, 'Тест')")
     cleanup_parser.add_argument("--code", help="Конкретный код доступа для удаления")
+    cleanup_parser.add_argument("--uid", help="UID конкретного идентификатора для принудительного удаления")
     cleanup_parser.add_argument("--mock-panel", action="store_true", help="Использовать mock BAS-IP")
 
     # Command: list-panels

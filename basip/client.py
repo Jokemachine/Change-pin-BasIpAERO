@@ -190,55 +190,70 @@ class BASIPClient:
 
     def get_identifiers(self, page: int = 1, limit: int = 50) -> List[Identifier]:
         """Fetch list of identifiers stored on the panel."""
-        # BAS-IP AA-14FB Swagger requires limit in [10, 20, 30, 50] and page_number >= 1
         safe_limit = limit if limit in (10, 20, 30, 50) else 50
 
         endpoint_configs = [
             # 1. Swagger 1.0 - 1.7 standard (query params: page_number, limit)
             ("/access/identifiers/items/list", {"page_number": page, "limit": safe_limit}),
-            # 2. Swagger without query params (uses panel defaults)
+            # 2. Swagger with paginationLimit parameter names
+            ("/access/identifiers/items/list", {"paginationPageNumber": page, "paginationLimit": safe_limit}),
+            # 3. Swagger without query params (uses panel defaults)
             ("/access/identifiers/items/list", {}),
-            # 3. Legacy endpoint
+            # 4. Legacy endpoint with items_limit
             ("/access/identifier/items", {"current_page": page, "items_limit": safe_limit}),
-            # 4. Legacy without query params
+            # 5. Legacy endpoint with page & limit
+            ("/access/identifier/items", {"page": page, "limit": safe_limit}),
+            # 6. Legacy without query params
             ("/access/identifier/items", {}),
-            # 5. REST plural
+            # 7. REST plural
             ("/access/identifiers", {"page": page, "limit": safe_limit}),
+            ("/access/identifiers", {}),
         ]
 
-        last_resp = None
+        best_resp = None
+        best_items = []
+
         for path, params in endpoint_configs:
             try:
                 resp = self._request("GET", path, params=params)
                 if resp.status_code == 200 and resp.text:
-                    data = resp.json()
-                    if isinstance(data, (dict, list)):
-                        last_resp = resp
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        continue
+
+                    raw_list = []
+                    if isinstance(data, dict):
+                        raw_list = (
+                            data.get("list_items")
+                            or data.get("items")
+                            or data.get("data")
+                            or data.get("identifiers")
+                            or []
+                        )
+                    elif isinstance(data, list):
+                        raw_list = data
+
+                    if isinstance(raw_list, list) and len(raw_list) > 0:
+                        # Found non-empty list of items!
+                        best_resp = resp
+                        best_items = raw_list
                         break
+                    elif best_resp is None:
+                        best_resp = resp
+                        best_items = raw_list if isinstance(raw_list, list) else []
             except Exception as e:
                 logger.debug("Panel %s: GET %s failed: %s", self.config.host, path, e)
                 continue
 
-        if last_resp is None or last_resp.status_code != 200:
-            status = last_resp.status_code if last_resp else 500
-            err_text = last_resp.text[:120] if last_resp else "No response"
+        if best_resp is None or best_resp.status_code != 200:
+            status = best_resp.status_code if best_resp else 500
+            err_text = best_resp.text[:120] if best_resp else "No response"
             logger.warning("Could not fetch identifiers from panel %s: HTTP %s - %s", self.config.host, status, err_text)
             return []
 
-        data = last_resp.json() if last_resp.text else {}
-        raw_items = []
-        if isinstance(data, dict):
-            raw_items = (
-                data.get("list_items")
-                or data.get("items")
-                or data.get("data")
-                or []
-            )
-        elif isinstance(data, list):
-            raw_items = data
-
         identifiers: List[Identifier] = []
-        for item in raw_items:
+        for item in best_items:
             if not isinstance(item, dict):
                 continue
             item_uid = (
@@ -253,23 +268,30 @@ class BASIPClient:
                 item.get("identifier_number")
                 or item.get("code")
                 or item.get("number")
+                or item.get("pin")
+                or item.get("input_code")
                 or ""
-            )
+            ).strip()
             id_type = item.get("identifier_type", item.get("type", "inputCode"))
 
-            # Extract name/owner
-            name = ""
+            # Extract name/owner comprehensively
             owner_field = item.get("identifier_owner")
+            name = ""
             if isinstance(owner_field, dict):
                 name = owner_field.get("name", "")
             elif isinstance(owner_field, str):
                 name = owner_field
-            elif item.get("name"):
-                name = str(item.get("name"))
-            elif item.get("owner"):
-                name = str(item.get("owner"))
-            elif item.get("user"):
-                name = str(item.get("user"))
+
+            if not name:
+                name = str(
+                    item.get("name")
+                    or item.get("owner")
+                    or item.get("owner_name")
+                    or item.get("user")
+                    or item.get("user_name")
+                    or item.get("description")
+                    or ""
+                ).strip()
 
             lock_val = item.get("lock", item.get("lock_number", self.config.lock_number))
             apt_num = item.get("apartment_number", item.get("apartment", None))
@@ -279,9 +301,9 @@ class BASIPClient:
             identifiers.append(
                 Identifier(
                     identifier_number=num,
-                    identifier_type=id_type,
+                    identifier_type=str(id_type),
                     name=name,
-                    item_uid=int(item_uid) if item_uid is not None and str(item_uid).isdigit() else None,
+                    item_uid=item_uid,
                     link_id=int(link_id) if link_id is not None and str(link_id).isdigit() else None,
                     lock_number=lock_val if isinstance(lock_val, int) else self.config.lock_number,
                     apartment_number=str(apt_num) if apt_num is not None else None,
@@ -290,22 +312,30 @@ class BASIPClient:
             )
 
         # Check pagination for additional pages
-        if isinstance(data, dict) and page == 1:
-            pagination = data.get("list_option", {}).get("pagination", {})
-            total_pages = pagination.get("total_pages", 1)
-            if isinstance(total_pages, int) and total_pages > 1:
-                for next_p in range(2, min(total_pages + 1, 10)):
-                    more_ids = self.get_identifiers(page=next_p, limit=safe_limit)
-                    identifiers.extend(more_ids)
+        try:
+            resp_data = best_resp.json()
+            if isinstance(resp_data, dict) and page == 1:
+                pagination = resp_data.get("list_option", {}).get("pagination", {})
+                total_pages = pagination.get("total_pages", 1)
+                if isinstance(total_pages, int) and total_pages > 1:
+                    for next_p in range(2, min(total_pages + 1, 10)):
+                        more_ids = self.get_identifiers(page=next_p, limit=safe_limit)
+                        identifiers.extend(more_ids)
+        except Exception:
+            pass
 
         return identifiers
 
     @staticmethod
     def _is_code_type(t: str) -> bool:
         if not t:
+            return True
+        clean = str(t).lower().replace("_", "").replace("-", "").strip()
+        # Physical credentials that are NEVER keypad PIN codes
+        physical_markers = ("card", "rfid", "mifare", "face", "ukey", "ble", "nfc", "physical")
+        if any(m in clean for m in physical_markers):
             return False
-        clean = t.lower().replace("_", "").replace("-", "")
-        return clean in ("inputcode", "code", "accesscode", "pin", "keypad")
+        return True
 
     def find_all_user_code_identifiers(
         self,
@@ -315,7 +345,7 @@ class BASIPClient:
     ) -> List[Identifier]:
         """
         Find ALL existing code identifiers belonging to a user.
-        Matches by name, old_code, or link_id (only code/inputCode type, never RFID cards).
+        Matches by name (case-insensitive), old_code, or link_id (only code/inputCode type, never RFID cards).
         """
         all_ids = self.get_identifiers(limit=50)
         code_ids = [i for i in all_ids if self._is_code_type(i.identifier_type)]
@@ -327,15 +357,17 @@ class BASIPClient:
         for item in code_ids:
             is_match = False
 
-            # Match by name (case-insensitive)
-            if clean_name and item.name and item.name.strip().lower() == clean_name:
-                is_match = True
+            # 1. Match by name (case-insensitive substring or exact match)
+            if clean_name and item.name:
+                item_name_clean = item.name.strip().lower()
+                if item_name_clean == clean_name or clean_name in item_name_clean or item_name_clean in clean_name:
+                    is_match = True
 
-            # Match by old code
+            # 2. Match by old code
             if clean_old_code and item.identifier_number == clean_old_code:
                 is_match = True
 
-            # Match by link_id
+            # 3. Match by link_id
             if link_id is not None and item.link_id == link_id:
                 is_match = True
 
@@ -569,41 +601,49 @@ class BASIPClient:
         self.create_identifier(new_code, name or "", lock_number)
         return True
 
-    def delete_identifier(self, item_uid: int) -> bool:
+    def delete_identifier(self, item_uid: Any) -> bool:
         """Delete an identifier by UID: DELETE /access/identifiers/item/{item_uid}."""
+        uid_str = str(item_uid)
         endpoints = [
-            f"/access/identifiers/item/{item_uid}",
-            f"/access/identifier/item/{item_uid}",
-            f"/access/identifier/{item_uid}",
+            f"/access/identifiers/item/{uid_str}",
+            f"/access/identifier/item/{uid_str}",
+            f"/access/identifier/{uid_str}",
         ]
         for ep in endpoints:
             try:
                 resp = self._request("DELETE", ep)
                 if resp.status_code in (200, 204):
-                    logger.info("Deleted identifier uid=%s via %s on panel %s", item_uid, ep, self.config.host)
+                    logger.info("Deleted identifier uid=%s via %s on panel %s", uid_str, ep, self.config.host)
                     return True
             except Exception as e:
                 logger.debug("Panel %s DELETE %s failed: %s", self.config.host, ep, e)
                 continue
 
         # Also try POST /access/identifiers/items/delete (Swagger batch delete)
-        try:
-            resp = self._request(
-                "POST",
-                "/access/identifiers/items/delete",
-                json={"count": 1, "uid_items": [item_uid]},
-            )
-            if resp.status_code in (200, 204):
-                logger.info(
-                    "Deleted identifier uid=%s via POST /access/identifiers/items/delete on panel %s",
-                    item_uid,
-                    self.config.host,
+        uid_val = int(uid_str) if uid_str.isdigit() else uid_str
+        for batch_payload in [
+            {"count": 1, "uid_items": [uid_val]},
+            {"uid_items": [uid_val]},
+            {"list_items": [uid_val]},
+            [uid_val],
+        ]:
+            try:
+                resp = self._request(
+                    "POST",
+                    "/access/identifiers/items/delete",
+                    json=batch_payload,
                 )
-                return True
-        except Exception:
-            pass
+                if resp.status_code in (200, 204):
+                    logger.info(
+                        "Deleted identifier uid=%s via POST /access/identifiers/items/delete on panel %s",
+                        uid_str,
+                        self.config.host,
+                    )
+                    return True
+            except Exception:
+                pass
 
-        logger.warning("Failed to delete identifier uid=%s on panel %s", item_uid, self.config.host)
+        logger.warning("Failed to delete identifier uid=%s on panel %s", uid_str, self.config.host)
         return False
 
     def cleanup_user_codes(
