@@ -35,8 +35,8 @@ google_sheets:
 
 # Отправка писем через Google Mail (Gmail SMTP)
 gmail:
-  user: "jokemachine5@gmail.com"
-  app_password: "lnoh vlal avlv iqtr"
+  user: "uk.rascvet@gmail.com"
+  app_password: "brkb apuq gvuk fnrx"
   from_name: "Домофон BAS-IP AA-14FB"
   subject: "Смена кода доступа домофона"
   smtp_host: "smtp.gmail.com"
