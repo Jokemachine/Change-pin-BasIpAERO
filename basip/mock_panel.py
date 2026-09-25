@@ -130,6 +130,14 @@ class MockBASIPRequestHandler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return self._send_json(401, {"error": "Unauthorized"})
 
+        # Delete multiple identifiers: /access/identifiers/items/delete
+        if path.endswith("/access/identifiers/items/delete"):
+            uid_items = body.get("uid_items") or body.get("list_items") or []
+            for uid in uid_items:
+                if uid in MockBASIPRequestHandler.identifiers:
+                    del MockBASIPRequestHandler.identifiers[uid]
+            return self._send_json(200, {"message": "Deleted"})
+
         # Create identifier: /access/identifiers/item or /access/identifier or /access/identifiers
         if any(path.endswith(ep) for ep in ("/access/identifiers/item", "/access/identifier", "/access/identifiers")):
             uid = MockBASIPRequestHandler.next_uid

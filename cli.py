@@ -277,20 +277,14 @@ def cmd_inspect_panel(args, config: AppConfig):
         except Exception as e:
             print(f" -> Ошибка: {e}")
 
-        print("\n[2] Проверка списков идентификаторов:")
-        for ep in ["/access/identifiers/items/list", "/access/identifier/items", "/access/identifiers"]:
-            try:
-                resp = client._request("GET", ep, params={"paginationLimit": 5, "items_limit": 5})
-                print(f" -> {ep}: HTTP {resp.status_code}")
-                if resp.status_code == 200:
-                    data = resp.json() if resp.text else {}
-                    items = data.get("list_items", []) if isinstance(data, dict) else data
-                    print(f"    Найдено записей: {len(items)}")
-                    if items:
-                        import json
-                        print(f"    Пример записи: {json.dumps(items[0], ensure_ascii=False, indent=2)}")
-            except Exception as e:
-                print(f" -> {ep}: Ошибка {e}")
+        print("\n[2] Список ВСЕХ идентификаторов в памяти панели:")
+        try:
+            identifiers = client.get_identifiers(limit=50)
+            print(f" -> Всего найдено записей: {len(identifiers)}")
+            for idx, ident in enumerate(identifiers, 1):
+                print(f"    #{idx}: UID={ident.item_uid} | Имя='{ident.name}' | Тип={ident.identifier_type} | Код='{ident.identifier_number}'")
+        except Exception as e:
+            print(f" -> Ошибка получения списка: {e}")
 
         if args.test_pin:
             print("\n[3] Тестовое создание и удаление PIN-кода '998877'...")
@@ -304,6 +298,30 @@ def cmd_inspect_panel(args, config: AppConfig):
                 print(f" -> Ошибка создания: {e}")
 
         print("\nДиагностика завершена.\n")
+    finally:
+        if mock_srv:
+            mock_srv.stop()
+
+
+def cmd_cleanup_codes(args, config: AppConfig):
+    """Purge stale/duplicate access codes for a specific user or code from panels."""
+    manager, sheets, mailer, rotator, mock_srv = create_components(config, mock_panel_server=args.mock_panel)
+    try:
+        user_name = args.user
+        code = args.code
+        if not user_name and not code:
+            print("Укажите имя пользователя (--user 'Имя') или код (--code '123456')")
+            return
+
+        print(f"\n--- Очистка кодов доступа: Пользователь='{user_name or 'Все'}', Код='{code or 'Все'}' ---")
+        results = manager.cleanup_user_codes_everywhere(name=user_name, code=code)
+        total_deleted = sum(results.values())
+        for panel, count in results.items():
+            if count > 0:
+                print(f"[{panel}]: Удалено {count} старых кодов")
+            else:
+                print(f"[{panel}]: Нет подходящих кодов для удаления")
+        print(f"\nИтого удалено кодов: {total_deleted}\n")
     finally:
         if mock_srv:
             mock_srv.stop()
@@ -412,6 +430,12 @@ def main():
     inspect_parser.add_argument("--test-pin", action="store_true", help="Попробовать создать и удалить тестовый PIN 998877")
     inspect_parser.add_argument("--mock-panel", action="store_true", help="Использовать mock BAS-IP")
 
+    # Command: cleanup-codes
+    cleanup_parser = subparsers.add_parser("cleanup-codes", help="Удалить устаревшие/дублирующиеся коды доступа с панелей")
+    cleanup_parser.add_argument("--user", help="Имя пользователя для очистки кодов (например, 'Тест')")
+    cleanup_parser.add_argument("--code", help="Конкретный код доступа для удаления")
+    cleanup_parser.add_argument("--mock-panel", action="store_true", help="Использовать mock BAS-IP")
+
     # Command: list-panels
     subparsers.add_parser("list-panels", help="Вывести список всех 38 панелей домофонов и их расположение")
 
@@ -446,6 +470,8 @@ def main():
         cmd_test_panel(args, config)
     elif args.command == "inspect-panel":
         cmd_inspect_panel(args, config)
+    elif args.command == "cleanup-codes":
+        cmd_cleanup_codes(args, config)
     elif args.command == "test-sheets":
         cmd_test_sheets(args, config)
     elif args.command == "test-email":

@@ -82,6 +82,46 @@ def test_delete_identifier(client):
     assert after_delete is None
 
 
+def test_set_user_access_code_deletes_old_code(client):
+    """Ensure set_user_access_code deletes previous PIN and leaves only the new active PIN."""
+    # First rotation
+    ident1 = client.set_user_access_code(name="Иван Тест", new_code="112233")
+    assert ident1.identifier_number == "112233"
+
+    all_ivan = client.find_all_user_code_identifiers(name="Иван Тест")
+    assert len(all_ivan) == 1
+    assert all_ivan[0].identifier_number == "112233"
+
+    # Second rotation (simulating running the rotation twice)
+    ident2 = client.set_user_access_code(name="Иван Тест", new_code="445566", old_code="112233")
+    assert ident2.identifier_number == "445566"
+
+    # Must find ONLY 1 code for Иван Тест, the old one must be gone
+    all_ivan_after = client.find_all_user_code_identifiers(name="Иван Тест")
+    assert len(all_ivan_after) == 1
+    assert all_ivan_after[0].identifier_number == "445566"
+    assert not any(i.identifier_number == "112233" for i in client.get_identifiers())
+
+
+def test_set_user_access_code_purges_multiple_duplicates(client):
+    """Ensure multiple old/duplicate codes are all purged when a new code is set."""
+    # Create two duplicate codes manually
+    client.create_identifier(code="777111", name="Тест Дубликатов")
+    client.create_identifier(code="777222", name="Тест Дубликатов")
+
+    duplicates = client.find_all_user_code_identifiers(name="Тест Дубликатов")
+    assert len(duplicates) == 2
+
+    # Rotate to a single new code
+    new_ident = client.set_user_access_code(name="Тест Дубликатов", new_code="888999")
+    assert new_ident.identifier_number == "888999"
+
+    # Verify both duplicates were deleted
+    remaining = client.find_all_user_code_identifiers(name="Тест Дубликатов")
+    assert len(remaining) == 1
+    assert remaining[0].identifier_number == "888999"
+
+
 def test_generate_38_panels_topology():
     """Verify that facility topology generates exactly 38 panels according to specification."""
     panels = generate_default_38_panels()

@@ -188,21 +188,33 @@ class BASIPClient:
                 msg = err_msg
             return (False, msg) if return_detail else False
 
-    def get_identifiers(self, page: int = 1, limit: int = 100) -> List[Identifier]:
+    def get_identifiers(self, page: int = 1, limit: int = 50) -> List[Identifier]:
         """Fetch list of identifiers stored on the panel."""
-        endpoints = [
-            ("/access/identifiers/items/list", {"paginationPageNumber": page, "paginationLimit": limit}),
-            ("/access/identifier/items", {"current_page": page, "items_limit": limit}),
-            ("/access/identifiers", {"page": page, "limit": limit}),
+        # BAS-IP AA-14FB Swagger requires limit in [10, 20, 30, 50] and page_number >= 1
+        safe_limit = limit if limit in (10, 20, 30, 50) else 50
+
+        endpoint_configs = [
+            # 1. Swagger 1.0 - 1.7 standard (query params: page_number, limit)
+            ("/access/identifiers/items/list", {"page_number": page, "limit": safe_limit}),
+            # 2. Swagger without query params (uses panel defaults)
+            ("/access/identifiers/items/list", {}),
+            # 3. Legacy endpoint
+            ("/access/identifier/items", {"current_page": page, "items_limit": safe_limit}),
+            # 4. Legacy without query params
+            ("/access/identifier/items", {}),
+            # 5. REST plural
+            ("/access/identifiers", {"page": page, "limit": safe_limit}),
         ]
 
         last_resp = None
-        for path, params in endpoints:
+        for path, params in endpoint_configs:
             try:
                 resp = self._request("GET", path, params=params)
-                if resp.status_code == 200:
-                    last_resp = resp
-                    break
+                if resp.status_code == 200 and resp.text:
+                    data = resp.json()
+                    if isinstance(data, (dict, list)):
+                        last_resp = resp
+                        break
             except Exception as e:
                 logger.debug("Panel %s: GET %s failed: %s", self.config.host, path, e)
                 continue
@@ -276,6 +288,16 @@ class BASIPClient:
                     raw_data=item,
                 )
             )
+
+        # Check pagination for additional pages
+        if isinstance(data, dict) and page == 1:
+            pagination = data.get("list_option", {}).get("pagination", {})
+            total_pages = pagination.get("total_pages", 1)
+            if isinstance(total_pages, int) and total_pages > 1:
+                for next_p in range(2, min(total_pages + 1, 10)):
+                    more_ids = self.get_identifiers(page=next_p, limit=safe_limit)
+                    identifiers.extend(more_ids)
+
         return identifiers
 
     @staticmethod
@@ -285,6 +307,43 @@ class BASIPClient:
         clean = t.lower().replace("_", "").replace("-", "")
         return clean in ("inputcode", "code", "accesscode", "pin", "keypad")
 
+    def find_all_user_code_identifiers(
+        self,
+        name: Optional[str] = None,
+        old_code: Optional[str] = None,
+        link_id: Optional[int] = None,
+    ) -> List[Identifier]:
+        """
+        Find ALL existing code identifiers belonging to a user.
+        Matches by name, old_code, or link_id (only code/inputCode type, never RFID cards).
+        """
+        all_ids = self.get_identifiers(limit=50)
+        code_ids = [i for i in all_ids if self._is_code_type(i.identifier_type)]
+
+        matched: List[Identifier] = []
+        clean_name = name.strip().lower() if name else None
+        clean_old_code = str(old_code).strip() if old_code else None
+
+        for item in code_ids:
+            is_match = False
+
+            # Match by name (case-insensitive)
+            if clean_name and item.name and item.name.strip().lower() == clean_name:
+                is_match = True
+
+            # Match by old code
+            if clean_old_code and item.identifier_number == clean_old_code:
+                is_match = True
+
+            # Match by link_id
+            if link_id is not None and item.link_id == link_id:
+                is_match = True
+
+            if is_match and item not in matched:
+                matched.append(item)
+
+        return matched
+
     def find_code_identifier(
         self,
         name: Optional[str] = None,
@@ -292,29 +351,8 @@ class BASIPClient:
         link_id: Optional[int] = None,
     ) -> Optional[Identifier]:
         """Find an existing input_code / inputCode identifier by name, code or link_id."""
-        all_ids = self.get_identifiers(limit=500)
-        code_ids = [i for i in all_ids if self._is_code_type(i.identifier_type)]
-
-        # Match by link_id if available
-        if link_id is not None:
-            for item in code_ids:
-                if item.link_id == link_id:
-                    return item
-
-        # Match by name (case-insensitive)
-        if name:
-            clean_name = name.strip().lower()
-            for item in code_ids:
-                if item.name and item.name.strip().lower() == clean_name:
-                    return item
-
-        # Match by current code
-        if code:
-            for item in code_ids:
-                if item.identifier_number == code:
-                    return item
-
-        return None
+        matches = self.find_all_user_code_identifiers(name=name, old_code=code, link_id=link_id)
+        return matches[0] if matches else None
 
     def create_identifier(
         self,
@@ -548,8 +586,38 @@ class BASIPClient:
                 logger.debug("Panel %s DELETE %s failed: %s", self.config.host, ep, e)
                 continue
 
+        # Also try POST /access/identifiers/items/delete (Swagger batch delete)
+        try:
+            resp = self._request(
+                "POST",
+                "/access/identifiers/items/delete",
+                json={"count": 1, "uid_items": [item_uid]},
+            )
+            if resp.status_code in (200, 204):
+                logger.info(
+                    "Deleted identifier uid=%s via POST /access/identifiers/items/delete on panel %s",
+                    item_uid,
+                    self.config.host,
+                )
+                return True
+        except Exception:
+            pass
+
         logger.warning("Failed to delete identifier uid=%s on panel %s", item_uid, self.config.host)
         return False
+
+    def cleanup_user_codes(
+        self,
+        name: Optional[str] = None,
+        code: Optional[str] = None,
+    ) -> int:
+        """Delete all keypad code identifiers matching name or code."""
+        stale = self.find_all_user_code_identifiers(name=name, old_code=code)
+        deleted = 0
+        for item in stale:
+            if item.item_uid is not None and self.delete_identifier(item.item_uid):
+                deleted += 1
+        return deleted
 
     def set_user_access_code(
         self,
@@ -561,25 +629,37 @@ class BASIPClient:
     ) -> Identifier:
         """
         High-level method to set or update a user's access code on the panel.
-        Finds existing identifier if present and updates it, otherwise creates a new one.
+        1. Finds ALL existing code identifiers matching the user (by name or old_code).
+        2. Deletes each existing code identifier to prevent multiple active codes.
+        3. Creates the single new access code identifier.
         """
-        existing = self.find_code_identifier(name=name, code=old_code, link_id=link_id)
-        if existing and existing.item_uid is not None:
-            logger.info(
-                "Found existing identifier uid=%s for user '%s', updating code...",
-                existing.item_uid,
-                name,
-            )
-            self.update_identifier(
-                item_uid=existing.item_uid,
-                new_code=new_code,
-                name=name,
-                lock_number=self.config.lock_number,
-            )
-            existing.identifier_number = new_code
-            return existing
+        # 1. Clean up ALL stale/duplicate codes for this user
+        existing_ids = self.find_all_user_code_identifiers(
+            name=name,
+            old_code=old_code,
+            link_id=link_id,
+        )
 
-        logger.info("No existing identifier found for user '%s', creating new one...", name)
+        if existing_ids:
+            logger.info(
+                "Found %d existing code identifier(s) for user '%s' on panel %s. Removing old codes...",
+                len(existing_ids),
+                name,
+                self.config.host,
+            )
+            for old_ident in existing_ids:
+                if old_ident.item_uid is not None:
+                    logger.info(
+                        "Deleting old code identifier uid=%s (code='%s', name='%s') from panel %s...",
+                        old_ident.item_uid,
+                        old_ident.identifier_number,
+                        old_ident.name,
+                        self.config.host,
+                    )
+                    self.delete_identifier(old_ident.item_uid)
+
+        # 2. Create fresh new access code
+        logger.info("Creating new access code '%s' for user '%s' on panel %s...", new_code, name, self.config.host)
         return self.create_identifier(
             code=new_code,
             name=name,
@@ -678,4 +758,24 @@ class BASIPManager:
                 desc, ok, err_detail = future.result()
                 results[desc] = (ok, err_detail)
 
+        return results
+
+    def cleanup_user_codes_everywhere(
+        self,
+        name: Optional[str] = None,
+        code: Optional[str] = None,
+        user: Optional[AccessCodeUser] = None,
+    ) -> Dict[str, int]:
+        """Delete all stale/duplicate code identifiers for user across target panels."""
+        target_configs = self.get_target_panels_for_user(user) if user else [p for p in self.panels if p.enabled]
+        results = {}
+        for p in target_configs:
+            client = self.clients[p.panel_id]
+            desc = f"{p.panel_id} [{p.location_str}]"
+            try:
+                cnt = client.cleanup_user_codes(name=name, code=code)
+                results[desc] = cnt
+            except Exception as e:
+                logger.error("Failed cleanup on %s: %s", p.panel_id, e)
+                results[desc] = 0
         return results
