@@ -5,7 +5,7 @@ currentDir = fso.GetParentFolderName(WScript.ScriptFullName)
 
 pythonExe = currentDir & "\.venv\Scripts\python.exe"
 If Not fso.FileExists(pythonExe) Then
-    pythonExe = "python.exe"
+    pythonExe = "py.exe"
 End If
 
 cmd = """" & pythonExe & """ """ & currentDir & "\main.py"" run"
