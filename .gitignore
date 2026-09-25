@@ -3,5 +3,7 @@ __pycache__/
 *$py.class
 .pytest_cache/
 .env
+.github_token
+*.token
 service_account.json
 *.log
