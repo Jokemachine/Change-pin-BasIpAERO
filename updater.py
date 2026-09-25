@@ -143,7 +143,9 @@ def main():
                 if (base_name in PROTECTED_LOCAL_FILES or rel_path.lower() in PROTECTED_LOCAL_FILES) and os.path.exists(target_path):
                     continue
 
-                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                parent_dir = os.path.dirname(target_path)
+                if parent_dir:
+                    os.makedirs(parent_dir, exist_ok=True)
                 try:
                     with z.open(member) as src, open(target_path, "wb") as dst:
                         shutil.copyfileobj(src, dst)
