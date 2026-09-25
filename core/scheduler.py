@@ -23,18 +23,21 @@ class RotationScheduler:
         self.check_interval_hours = check_interval_hours
         self._running = False
 
-    def _schedule_fast_retry(self, seconds: int = 30):
-        """Schedule a fast retry when the previous cycle failed due to network/backend error."""
+    def _schedule_fast_retry(self, seconds: int = 60):
+        """Schedule a one-off retry when the previous cycle failed due to network/backend error."""
+        if getattr(self, "_has_pending_retry", False):
+            return
+
+        self._has_pending_retry = True
+
         def _retry_job():
-            try:
-                schedule.cancel_job(_retry_job)
-            except Exception:
-                pass
+            self._has_pending_retry = False
             logger.info("Повторная попытка проверки ротации после сбоя сети...")
             self._job_wrapper()
+            return schedule.CancelJob
 
         schedule.every(seconds).seconds.do(_retry_job)
-        logger.info("Запланирована повторная проверка через %d секунд.", seconds)
+        logger.info("Запланирована однократная повторная проверка через %d секунд.", seconds)
 
     def _job_wrapper(self):
         logger.info("Scheduler triggered automatic access code rotation check...")
@@ -47,12 +50,12 @@ class RotationScheduler:
                 report.failed_count,
             )
             if getattr(report, "backend_error", False):
-                logger.warning("Проверка не смогла прочитать таблицу. Повторная попытка через 30 секунд...")
-                self._schedule_fast_retry(30)
+                logger.warning("Проверка не смогла прочитать таблицу. Повторная попытка через 60 секунд...")
+                self._schedule_fast_retry(60)
         except Exception as exc:
             logger.exception("Error during scheduled rotation job: %s", exc)
-            logger.warning("Произошла ошибка при выполнении задания. Повторная попытка через 30 секунд...")
-            self._schedule_fast_retry(30)
+            logger.warning("Произошла ошибка при выполнении задания. Повторная попытка через 60 секунд...")
+            self._schedule_fast_retry(60)
 
     def run_daemon(self, run_immediately: bool = True):
         """Start scheduler loop."""
