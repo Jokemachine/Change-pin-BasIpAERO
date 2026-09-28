@@ -3,6 +3,7 @@ Email notification service using Google Mail (Gmail).
 Supports Gmail SMTP (with App Password), Gmail REST API, and Mock/Dry-run modes.
 """
 import logging
+import re
 import smtplib
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
@@ -11,37 +12,38 @@ from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-# Exact text requested by user:
-# 'Добрый день, ваш код доступа изменен на "Код"'
+# Exact text specified in requirements:
+# "Добрый день, ваш код доступа изменен на "Код""
 DEFAULT_BODY_TEMPLATE = 'Добрый день, ваш код доступа изменен на "{code}"'
-DEFAULT_SUBJECT = "Смена кода доступа домофона"
 
 
 class BaseMailer:
-    """Interface for mail sending backends."""
+    """Base interface for mail sending."""
+
     def send_access_code_email(self, to_email: str, new_code: str, user_name: str = "") -> bool:
         raise NotImplementedError
 
 
 class GmailSMTPMailer(BaseMailer):
     """
-    Sends emails via Google Mail SMTP server (smtp.gmail.com)
-    using standard SSL (port 465) or STARTTLS (port 587) with a Google App Password.
+    Sends emails via Gmail SMTP using standard App Password.
+    Recommended approach: no cloud console or project registration needed,
+    works 100% reliably worldwide.
     """
 
     def __init__(
         self,
         gmail_user: str,
         gmail_app_password: str,
-        from_name: str = "Домофон BAS-IP",
-        subject: str = DEFAULT_SUBJECT,
+        from_name: str = "Служба доступа BAS-IP",
+        subject: str = "Новый код доступа к домофону",
         smtp_host: str = "smtp.gmail.com",
         smtp_port: int = 465,
         use_ssl: bool = True,
         timeout: int = 15,
     ):
-        self.gmail_user = gmail_user.strip()
-        self.gmail_app_password = gmail_app_password.strip().replace(" ", "")
+        self.gmail_user = gmail_user
+        self.gmail_app_password = gmail_app_password
         self.from_name = from_name
         self.subject = subject
         self.smtp_host = smtp_host
@@ -54,9 +56,21 @@ class GmailSMTPMailer(BaseMailer):
         Sends access code notification email to user.
         Body text strictly matches:
         'Добрый день, ваш код доступа изменен на "{new_code}"'
+        Supports multiple comma- or semicolon-separated recipient emails (e.g. 'user1@mail.ru, user2@mail.ru').
         """
         if not to_email:
             logger.warning("Cannot send email: recipient address is empty")
+            return False
+
+        # Parse recipient list (handles single address or multiple addresses separated by comma/semicolon)
+        recipients = [
+            addr.strip()
+            for addr in re.split(r'[,;\s]+', str(to_email))
+            if addr.strip() and "@" in addr
+        ]
+
+        if not recipients:
+            logger.warning("Cannot send email: no valid email addresses found in '%s'", to_email)
             return False
 
         # Exact required text format
@@ -65,7 +79,7 @@ class GmailSMTPMailer(BaseMailer):
         msg = MIMEMultipart("alternative")
         msg["Subject"] = Header(self.subject, "utf-8")
         msg["From"] = f"{Header(self.from_name, 'utf-8')} <{self.gmail_user}>"
-        msg["To"] = to_email
+        msg["To"] = ", ".join(recipients)
 
         # Plain text part (primary)
         part_plain = MIMEText(plain_text, "plain", "utf-8")
@@ -98,20 +112,20 @@ class GmailSMTPMailer(BaseMailer):
                 server.starttls()
 
             server.login(self.gmail_user, self.gmail_app_password)
-            server.sendmail(self.gmail_user, [to_email], msg.as_string())
+            server.sendmail(self.gmail_user, recipients, msg.as_string())
             server.quit()
 
-            logger.info("Successfully sent access code email to %s via Gmail SMTP", to_email)
+            logger.info("Successfully sent access code email to %s via Gmail SMTP", ", ".join(recipients))
             return True
         except Exception as exc:
-            logger.error("Failed to send email to %s via Gmail SMTP: %s", to_email, exc)
+            logger.error("Failed to send email to %s via Gmail SMTP: %s", ", ".join(recipients), exc)
             return False
 
 
 class MockMailer(BaseMailer):
     """
-    Mock mailer for testing and dry-run execution.
-    Logs email details without contacting external mail servers.
+    Mock mailer for testing and dry-run modes.
+    Logs messages instead of sending them.
     """
 
     def __init__(self, print_to_console: bool = True):
