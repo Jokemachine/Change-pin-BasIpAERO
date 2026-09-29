@@ -72,9 +72,8 @@ class RotationScheduler:
         if self.schedule_time:
             schedule.every().day.at(self.schedule_time).do(self._job_wrapper)
             logger.info("Scheduled daily rotation check at %s", self.schedule_time)
-
-        # Also schedule periodic interval check (e.g. every 12 hours)
-        if self.check_interval_hours and self.check_interval_hours > 0:
+        elif self.check_interval_hours and self.check_interval_hours > 0:
+            # Only use periodic interval if schedule_time is not set
             schedule.every(self.check_interval_hours).hours.do(self._job_wrapper)
             logger.info("Scheduled interval rotation check every %d hours", self.check_interval_hours)
 

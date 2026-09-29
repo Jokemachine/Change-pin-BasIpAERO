@@ -4,6 +4,7 @@ Handles local authentication, identifier retrieval, creation, updating, and dele
 """
 import hashlib
 import logging
+import re
 from typing import List, Optional, Dict, Any
 import requests
 from requests.auth import HTTPBasicAuth
@@ -425,7 +426,14 @@ class BASIPClient:
             # 1. Match by name (case-insensitive substring or exact match)
             if clean_name and item.name:
                 item_name_clean = item.name.strip().lower()
-                if item_name_clean == clean_name or clean_name in item_name_clean or item_name_clean in clean_name:
+
+                # If both clean_name and item.name specify apartment numbers, prevent cross-apartment deletion!
+                apt1 = re.search(r'кв\.?\s*(\d+)', clean_name)
+                apt2 = re.search(r'кв\.?\s*(\d+)', item_name_clean)
+                if apt1 and apt2 and apt1.group(1) != apt2.group(1):
+                    # Different apartments -> do NOT match
+                    pass
+                elif item_name_clean == clean_name or clean_name in item_name_clean or item_name_clean in clean_name:
                     is_match = True
 
             # 2. Match by old code
@@ -860,9 +868,12 @@ class BASIPManager:
         if user is not None:
             target_configs = self.get_target_panels_for_user(user)
             apartment = user.apartment
+            # If user has an apartment specified, include in owner label to avoid multi-apartment collision
+            owner_name = f"{name} (кв. {user.apartment})" if user.apartment else name
         else:
             target_configs = [p for p in self.panels if p.enabled]
             apartment = None
+            owner_name = name
 
         if not target_configs:
             logger.warning("No target panels found for user '%s'", name)
@@ -877,7 +888,7 @@ class BASIPManager:
             desc = f"{pid} [{panel_cfg.location_str}]"
             try:
                 client.set_user_access_code(
-                    name=name,
+                    name=owner_name,
                     new_code=new_code,
                     old_code=old_code,
                     link_id=link_id,

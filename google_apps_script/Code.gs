@@ -2,15 +2,14 @@
  * Google Apps Script (GAS) для интеграции с программой смены кодов BAS-IP.
  * Не требует Google Cloud Console, работает бесплатно в любой стране!
  *
- * Инструкция по установке:
+ * Инструкция по установке / обновлению:
  * 1. В вашей Google Таблице откройте меню: «Расширения» -> «Apps Script»
  * 2. Удалите старый код и вставьте содержимое этого файла
- * 3. Нажмите «Сохранить» (Ctrl+S)
+ * 3. Нажмите «Сохранить» (Ctrl+S или иконка дискеты)
  * 4. Нажмите «Развернуть» (Deploy) -> «Управление развертываниями» (Manage deployments)
  * 5. Нажмите на иконку карандаша ✏️ (Редактировать)
- * 6. В поле «Версия» (Version) выберите: «Новая версия» (New version)  <--- ВАЖНО!
- * 7. В поле «У кого есть доступ»: выберите «Все» (Anyone)
- * 8. Нажмите «Развернуть» (Deploy).
+ * 6. В поле «Версия» (Version) выберите: «Новая версия» (New version)  <--- ОБЯЗАТЕЛЬНО!
+ * 7. Нажмите «Развернуть» (Deploy).
  */
 
 var API_KEY = ""; 
@@ -120,13 +119,13 @@ function handleRequest(params) {
       var row = data[r];
       if (!row || row.every(function(cell) { return cell === ""; })) continue;
 
-      var name = nameCol >= 0 ? String(row[nameCol] || "") : "";
-      var email = emailCol >= 0 ? String(row[emailCol] || "") : "";
+      var name = nameCol >= 0 ? String(row[nameCol] || "").trim() : "";
+      var email = emailCol >= 0 ? String(row[emailCol] || "").trim() : "";
       if (!name && !email) continue;
 
-      var aptVal = aptCol >= 0 ? String(row[aptCol] || "") : "";
-      var houseVal = houseCol >= 0 ? String(row[houseCol] || "") : "";
-      var entranceVal = entranceCol >= 0 ? String(row[entranceCol] || "") : "";
+      var aptVal = aptCol >= 0 ? String(row[aptCol] || "").trim() : "";
+      var houseVal = houseCol >= 0 ? String(row[houseCol] || "").trim() : "";
+      var entranceVal = entranceCol >= 0 ? String(row[entranceCol] || "").trim() : "";
 
       // Если дом или подъезд не вынесены в отдельные столбцы, извлекаем из квартиры/комментария
       if (aptVal && (!houseVal || !entranceVal)) {
@@ -145,24 +144,31 @@ function handleRequest(params) {
         if (row[dateCol] instanceof Date) {
           dateVal = Utilities.formatDate(row[dateCol], Session.getScriptTimeZone() || "GMT+3", "yyyy-MM-dd HH:mm:ss");
         } else {
-          dateVal = String(row[dateCol]);
+          dateVal = String(row[dateCol]).trim();
         }
+      }
+
+      var currentId = idCol >= 0 && row[idCol] ? String(row[idCol]).trim() : "";
+      var assignedId = currentId || ("user_" + (r + 1));
+      if (idCol >= 0 && !currentId) {
+        // Автоматически заполняем пустую ячейку ID уникальным значением
+        sheet.getRange(r + 1, idCol + 1).setValue(assignedId);
       }
 
       users.push({
         row_index: r + 1,
-        id: idCol >= 0 && row[idCol] ? String(row[idCol]) : ("user_" + (r + 1)),
+        id: assignedId,
         name: name,
         email: email,
         apartment: aptVal,
         house: houseVal,
         entrance: entranceVal,
-        access_panels: accessCol >= 0 ? String(row[accessCol] || "") : "",
-        code: codeCol >= 0 ? String(row[codeCol] || "") : "",
-        auto_rotate: autoCol >= 0 ? String(row[autoCol] || "Да") : "Да",
+        access_panels: accessCol >= 0 ? String(row[accessCol] || "").trim() : "",
+        code: codeCol >= 0 ? String(row[codeCol] || "").trim() : "",
+        auto_rotate: autoCol >= 0 ? String(row[autoCol] || "Да").trim() : "Да",
         last_rotated: dateVal,
         interval_days: intervalCol >= 0 && row[intervalCol] ? Number(row[intervalCol]) : 14,
-        status: statusCol >= 0 ? String(row[statusCol] || "") : ""
+        status: statusCol >= 0 ? String(row[statusCol] || "").trim() : ""
       });
     }
 
@@ -193,33 +199,107 @@ function handleRequest(params) {
 
     var idCol = findCol(["id", "ид", "номер", "user_id"]);
     var nameCol = findCol(["имя", "фио", "name", "fio", "пользователь"]);
+    var aptCol = findCol(["квартира", "офис", "apartment", "flat", "room", "помещение"]);
+    var emailCol = findCol(["email", "e-mail", "почта", "mail", "почта заявителя", "электронная почта", "контакты"]);
     var codeCol = findCol(["код", "код доступа", "рабочий код", "текущий код", "code", "pin"]);
     var dateCol = findCol(["дата последней смены", "дата смены", "last_rotated", "last_change"]);
     var statusCol = findCol(["статус", "status"]);
 
-    var targetId = String(params.user_id || "");
+    var reqRowIndex = parseInt(params.row_index, 10);
+    var targetId = String(params.user_id || "").trim().toLowerCase();
     var targetName = String(params.name || "").trim().toLowerCase();
-    var newCode = String(params.code || "");
+    var targetEmail = String(params.email || "").trim().toLowerCase();
+    var targetApt = String(params.apartment || "").trim().toLowerCase();
+    var newCode = String(params.code || "").trim();
     var newStatus = String(params.status || "Успешно обновлен");
     var dateStr = params.timestamp || Utilities.formatDate(new Date(), Session.getScriptTimeZone() || "GMT+3", "yyyy-MM-dd HH:mm:ss");
 
     var targetRow = -1;
-    for (var r = 1; r < data.length; r++) {
-      var rowId = idCol > 0 ? String(data[r][idCol - 1]) : "";
-      var rowName = nameCol > 0 ? String(data[r][nameCol - 1]).trim().toLowerCase() : "";
 
-      if ((targetId && rowId === targetId) || (targetName && rowName === targetName)) {
-        targetRow = r + 1;
-        break;
+    // Стратегия 1: Точный номер строки (row_index), переданный из программы
+    if (!isNaN(reqRowIndex) && reqRowIndex >= 2 && reqRowIndex <= data.length) {
+      var rData = data[reqRowIndex - 1];
+      var rId = idCol > 0 ? String(rData[idCol - 1] || "").trim().toLowerCase() : "";
+      var rName = nameCol > 0 ? String(rData[nameCol - 1] || "").trim().toLowerCase() : "";
+      var rApt = aptCol > 0 ? String(rData[aptCol - 1] || "").trim().toLowerCase() : "";
+      var rEmail = emailCol > 0 ? String(rData[emailCol - 1] || "").trim().toLowerCase() : "";
+
+      var matches = false;
+      if (targetId && rId && rId === targetId) matches = true;
+      if (targetName && rName && (rName === targetName || rName.indexOf(targetName) >= 0 || targetName.indexOf(rName) >= 0)) matches = true;
+      if (targetApt && rApt && rApt === targetApt) matches = true;
+      if (targetEmail && rEmail && (rEmail.indexOf(targetEmail) >= 0 || targetEmail.indexOf(rEmail) >= 0)) matches = true;
+
+      if (matches) {
+        targetRow = reqRowIndex;
+      }
+    }
+
+    // Стратегия 2: Поиск по уникальному ID пользователя (если колонка id заполнена в таблице)
+    if (targetRow <= 0 && targetId) {
+      for (var r = 1; r < data.length; r++) {
+        var rowId = idCol > 0 ? String(data[r][idCol - 1] || "").trim().toLowerCase() : "";
+        if (rowId && rowId === targetId) {
+          targetRow = r + 1;
+          break;
+        }
+      }
+    }
+
+    // Стратегия 3: Поиск по ФИО + Номер квартиры (критично при наличии нескольких квартир у одного владельца!)
+    if (targetRow <= 0 && targetName && targetApt) {
+      for (var r = 1; r < data.length; r++) {
+        var rowName = nameCol > 0 ? String(data[r][nameCol - 1] || "").trim().toLowerCase() : "";
+        var rowApt = aptCol > 0 ? String(data[r][aptCol - 1] || "").trim().toLowerCase() : "";
+        if (rowName === targetName && rowApt === targetApt) {
+          targetRow = r + 1;
+          break;
+        }
+      }
+    }
+
+    // Стратегия 4: Поиск по ФИО + Email
+    if (targetRow <= 0 && targetName && targetEmail) {
+      for (var r = 1; r < data.length; r++) {
+        var rowName = nameCol > 0 ? String(data[r][nameCol - 1] || "").trim().toLowerCase() : "";
+        var rowEmail = emailCol > 0 ? String(data[r][emailCol - 1] || "").trim().toLowerCase() : "";
+        if (rowName === targetName && rowEmail && (rowEmail.indexOf(targetEmail) >= 0 || targetEmail.indexOf(rowEmail) >= 0)) {
+          targetRow = r + 1;
+          break;
+        }
+      }
+    }
+
+    // Стратегия 5: Поиск по ФИО (резервный поиск)
+    if (targetRow <= 0 && targetName) {
+      for (var r = 1; r < data.length; r++) {
+        var rowName = nameCol > 0 ? String(data[r][nameCol - 1] || "").trim().toLowerCase() : "";
+        if (rowName === targetName) {
+          targetRow = r + 1;
+          break;
+        }
       }
     }
 
     if (targetRow > 0) {
-      if (codeCol > 0) sheet.getRange(targetRow, codeCol).setValue(newCode);
+      // Сохраняем код в текстовом формате, чтобы сохранить ведущие нули (например '026896')
+      if (codeCol > 0) {
+        var codeCell = sheet.getRange(targetRow, codeCol);
+        codeCell.setNumberFormat("@");
+        codeCell.setValue(newCode);
+      }
       if (dateCol > 0) sheet.getRange(targetRow, dateCol).setValue(dateStr);
       if (statusCol > 0) sheet.getRange(targetRow, statusCol).setValue(newStatus);
 
-      // Отправка письма прямо из Google Почты аккаунта
+      // Заполняем ID строки, если он был пустой
+      if (idCol > 0) {
+        var idCell = sheet.getRange(targetRow, idCol);
+        if (!idCell.getValue()) {
+          idCell.setValue(params.user_id || ("user_" + targetRow));
+        }
+      }
+
+      // Отправка письма прямо из Google Почты аккаунта (если передано send_email)
       var emailSent = false;
       var recipientEmail = params.email;
       if (params.send_email && recipientEmail) {
@@ -245,7 +325,7 @@ function handleRequest(params) {
     return ContentService.createTextOutput(JSON.stringify({
       success: false,
       sheet_name: sheet.getName(),
-      error: "Пользователь не найден на вкладке '" + sheet.getName() + "' (ID: " + targetId + ", Имя: " + targetName + ")"
+      error: "Пользователь не найден на вкладке '" + sheet.getName() + "' (ID: " + targetId + ", Имя: " + targetName + ", Кв: " + targetApt + ", Строка: " + reqRowIndex + ")"
     })).setMimeType(ContentService.MimeType.JSON);
   }
 

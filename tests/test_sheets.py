@@ -82,6 +82,10 @@ def test_google_apps_script_backend():
         assert ok is True
         assert user.current_code == "654321"
         mock_post.assert_called_once()
+        payload = mock_post.call_args[1]["json"]
+        assert payload["row_index"] == 2
+        assert payload["apartment"] == "12"
+        assert payload["code"] == "654321"
 
 
 def test_appsheet_backend():

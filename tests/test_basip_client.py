@@ -1,10 +1,11 @@
 """
 Unit and integration tests for BAS-IP AA-14FB client, 38 panels topology, and access rules.
 """
+from unittest.mock import patch
 import pytest
 from basip.client import BASIPClient, BASIPManager
 from basip.mock_panel import MockBASIPServer
-from basip.models import BASIPPanelConfig, AccessCodeUser
+from basip.models import BASIPPanelConfig, AccessCodeUser, Identifier
 from basip.topology import (
     generate_default_38_panels,
     load_panels_from_yaml,
@@ -237,4 +238,41 @@ def test_yaml_and_csv_panel_loading(tmp_path):
     assert loaded_csv[2].panel_id == "d1_p1_a"
     assert loaded_csv[2].building == 1
     assert loaded_csv[2].entrance == 1
+
+
+def test_apartment_collision_prevention():
+    """Ensure two apartments of the same resident do not delete each other's identifiers."""
+    config = BASIPPanelConfig(panel_id="p1", host="127.0.0.1")
+    client = BASIPClient(config)
+
+    # Mock panel identifiers with 2 apartments for same user
+    ident_apt132 = Identifier(
+        identifier_number="111222",
+        identifier_type="inputCode",
+        name="Молоканов Дмитрий Александрович (кв. 132)",
+        item_uid=10,
+    )
+    ident_apt135 = Identifier(
+        identifier_number="333444",
+        identifier_type="inputCode",
+        name="Молоканов Дмитрий Александрович (кв. 135)",
+        item_uid=20,
+    )
+
+    with patch.object(client, "get_identifiers", return_value=[ident_apt132, ident_apt135]):
+        # Searching for кв. 135 to rotate must NOT match кв. 132
+        matches_135 = client.find_all_user_code_identifiers(
+            name="Молоканов Дмитрий Александрович (кв. 135)",
+            old_code="333444",
+        )
+        assert len(matches_135) == 1
+        assert matches_135[0].item_uid == 20
+
+        matches_132 = client.find_all_user_code_identifiers(
+            name="Молоканов Дмитрий Александрович (кв. 132)",
+            old_code="111222",
+        )
+        assert len(matches_132) == 1
+        assert matches_132[0].item_uid == 10
+
 

@@ -277,9 +277,13 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
         payload = {
             "action": "update_code",
             "sheet_name": self.worksheet_name,
+            "row_index": user.row_index,
             "user_id": user.user_id,
             "name": user.name,
             "email": user.email,
+            "apartment": user.apartment,
+            "house": user.house,
+            "entrance": user.entrance,
             "code": new_code,
             "status": status,
             "timestamp": date_str,
@@ -299,7 +303,13 @@ class GoogleAppsScriptBackend(BaseSheetsBackend):
                         user.current_code = new_code
                         user.last_rotated = rotation_time
                         user.status = status
-                        logger.info("Updated Google Sheet for '%s': code=%s", user.name, new_code)
+                        updated_row = data.get("row")
+                        if updated_row and user.row_index and updated_row != user.row_index:
+                            logger.warning(
+                                "Внимание: Google Apps Script обновил строку %s вместо строки %s для '%s' (кв. %s). Обновите код Code.gs в Google Таблице!",
+                                updated_row, user.row_index, user.name, user.apartment
+                            )
+                        logger.info("Updated Google Sheet for '%s' (строка %s): code=%s", user.name, updated_row or user.row_index, new_code)
                         return True
                     raise RuntimeError(f"Apps Script update failed: {data.get('error')}")
                 logger.warning(
