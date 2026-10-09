@@ -100,3 +100,18 @@
 2. Проверить API на одной панели (тестовый identifier, отзыв).
 3. Реализовать клиент BAS-IP и guest service с мок-тестами.
 4. Подключить экран в мобильном приложении (после получения репозитория).
+
+## 7. Проверка ответа «API BAS-IP: /api/access/identifier, /png, zones, max_passes»
+
+Сверка с опубликованной документацией BAS-IP (developers.bas-ip.com, поиск по открытым страницам):
+
+| Утверждение | Статус |
+|---|---|
+| Авторизация `Authorization: Bearer <token>` | Подтверждено для API панелей. Токен живёт 2 часа, refresh-токенов нет |
+| `POST /api/access/identifier` с `type: "qr"`, `zones`, `max_passes`, `expires_at` | Не найдено. В документации: `POST /access/identifiers/item` (Android 1.8.0) и `POST /access/identifier/item` или `/access/identifier` в других версиях. Поля другие: время задаётся через time profile |
+| `GET /api/access/identifier/{id}/png` | Не найдено в открытой документации |
+| `POST /api/access/identifier/{id}/timeprofile` | Не найдено. Реально: `POST /access/identifiers/item/{uid}/timeProfile/{tpUid}` и `POST /access/timeprofile/item` |
+| «Reset identifier left passes» | Не найдено |
+| Версия API «v2.21.0» | Не найдена. Публичные версии: Android 1.8.0, Camdroid, 3.4.0 прошивки |
+
+Вывод: пути и поля в ответе похожи на придуманные. Пути отличаются в разных версиях прошивки, поэтому их нужно проверить на самой панели. Plan: получить токен, вызвать `GET` на известных эндпоинтах и посмотреть Swagger/страницу API в веб-интерфейсе панели. Не опираться на текст без проверки.
